@@ -58,6 +58,25 @@ namespace Bellwood.AdminApi.Services
             <pre>{WebUtility.HtmlEncode(json)}</pre>"
             };
 
+            var returnWhen = draft.ReturnPickupTime?.ToString("G");
+
+            builder.TextBody =
+            $@"Bellwood Elite — New Quote
+            Reference: {referenceId}
+            Booker: {bookerName} - {bookerPhone} - {bookerEmail}
+            Passenger: {paxName} - {paxPhone} - {paxEmail}
+
+            Pickup: {draft.PickupDateTime:G} — {draft.PickupLocation}
+            Vehicle: {draft.VehicleClass}
+            Passengers/Luggage: {draft.PassengerCount} pax, {draft.CheckedBags ?? 0} checked, {draft.CarryOnBags ?? 0} carry-on
+            As Directed: {draft.AsDirected}{(draft.AsDirected ? $" ({draft.Hours}h)" : "")}
+            Round Trip: {draft.RoundTrip}{(draft.RoundTrip ? $" (Return {returnWhen})" : "")}
+            Additional Request: {draft.AdditionalRequest}{(string.IsNullOrWhiteSpace(draft.AdditionalRequestOtherText) ? "" : $" — {draft.AdditionalRequestOtherText}")}
+
+            JSON:
+            {json}";
+
+
             msg.Body = builder.ToMessageBody();
 
             using var smtp = new SmtpClient();
