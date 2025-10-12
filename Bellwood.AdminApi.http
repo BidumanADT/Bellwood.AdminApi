@@ -1,0 +1,6 @@
+@Bellwood.AdminApi_HostAddress = http://localhost:5157
+
+GET {{Bellwood.AdminApi_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
