@@ -41,24 +41,36 @@ namespace Bellwood.AdminApi.Services
             var paxPhone = string.IsNullOrWhiteSpace(draft.Passenger?.PhoneNumber) ? "N/A" : draft.Passenger!.PhoneNumber!;
             var paxEmail = string.IsNullOrWhiteSpace(draft.Passenger?.EmailAddress) ? "N/A" : draft.Passenger!.EmailAddress!;
 
+            var dropoffText = draft.AsDirected
+                ? "As Directed"
+                : (string.IsNullOrWhiteSpace(draft.DropoffLocation) ? "N/A" : draft.DropoffLocation);
+
+            var returnWhen = draft.ReturnPickupTime?.ToString("G"); // null => empty
+            var returnPickupLoc = draft.DropoffLocation ?? draft.PickupLocation; // return pickup = outbound dropoff (or fallback)
+
             var builder = new BodyBuilder
             {
-                HtmlBody = $@"
+            HtmlBody = $@"
             <h3>Bellwood Elite — New Quote</h3>
             <p><b>Reference:</b> {H(referenceId)}</p>
             <p><b>Booker:</b> {H(bookerName)} &mdash; {H(bookerPhone)} &mdash; {EmailLink(bookerEmail)}</p>
             <p><b>Passenger:</b> {H(paxName)} &mdash; {H(paxPhone)} &mdash; {EmailLink(paxEmail)}</p>
 
-            <p><b>Pickup:</b> {draft.PickupDateTime:G} — {H(draft.PickupLocation)}</p><p><b>Vehicle:</b> {H(draft.VehicleClass)}</p>
+            <p><b>Pickup:</b> {draft.PickupDateTime:G} — {H(draft.PickupLocation)}</p>
+            <p><b>Dropoff:</b> {H(dropoffText)}</p>
+
+            <p><b>Vehicle:</b> {H(draft.VehicleClass)}</p>
             <p><b>Passengers/Luggage:</b> {draft.PassengerCount} pax, {draft.CheckedBags ?? 0} checked, {draft.CarryOnBags ?? 0} carry-on</p>
             <p><b>As Directed:</b> {draft.AsDirected} {(draft.AsDirected ? $"({draft.Hours}h)" : "")}</p>
-            <p><b>Round Trip:</b> {draft.RoundTrip} {(draft.RoundTrip ? $"(Return {draft.ReturnPickupTime:G})" : "")}</p>
+            <p><b>Round Trip:</b> {draft.RoundTrip} {(draft.RoundTrip ? $"(Return {H(returnWhen)})" : "")}</p>
+            {(draft.RoundTrip && draft.ReturnPickupTime is not null ? $@"
+            <p><b>Return Pickup:</b> {H(returnWhen)} — {H(returnPickupLoc)}</p>
+            <p><b>Return Dropoff:</b> {H(draft.PickupLocation)}</p>" : "")}
             <p><b>Additional Request:</b> {H(draft.AdditionalRequest)} {(string.IsNullOrWhiteSpace(draft.AdditionalRequestOtherText) ? "" : $"— {H(draft.AdditionalRequestOtherText)}")}</p>
             <hr/>
             <pre>{WebUtility.HtmlEncode(json)}</pre>"
             };
 
-            var returnWhen = draft.ReturnPickupTime?.ToString("G");
 
             builder.TextBody =
             $@"Bellwood Elite — New Quote
@@ -67,15 +79,17 @@ namespace Bellwood.AdminApi.Services
             Passenger: {paxName} - {paxPhone} - {paxEmail}
 
             Pickup: {draft.PickupDateTime:G} — {draft.PickupLocation}
+            Dropoff: {dropoffText}
             Vehicle: {draft.VehicleClass}
             Passengers/Luggage: {draft.PassengerCount} pax, {draft.CheckedBags ?? 0} checked, {draft.CarryOnBags ?? 0} carry-on
             As Directed: {draft.AsDirected}{(draft.AsDirected ? $" ({draft.Hours}h)" : "")}
             Round Trip: {draft.RoundTrip}{(draft.RoundTrip ? $" (Return {returnWhen})" : "")}
-            Additional Request: {draft.AdditionalRequest}{(string.IsNullOrWhiteSpace(draft.AdditionalRequestOtherText) ? "" : $" — {draft.AdditionalRequestOtherText}")}
+            {(draft.RoundTrip && draft.ReturnPickupTime is not null ? $@"Return Pickup: {returnWhen} — {returnPickupLoc}
+            Return Dropoff: {draft.PickupLocation}
+            " : "")}Additional Request: {draft.AdditionalRequest}{(string.IsNullOrWhiteSpace(draft.AdditionalRequestOtherText) ? "" : $" — {draft.AdditionalRequestOtherText}")}
 
             JSON:
             {json}";
-
 
             msg.Body = builder.ToMessageBody();
 
