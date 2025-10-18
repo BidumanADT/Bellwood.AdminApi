@@ -41,11 +41,29 @@ namespace Bellwood.AdminApi.Services
             var paxPhone = string.IsNullOrWhiteSpace(draft.Passenger?.PhoneNumber) ? "N/A" : draft.Passenger!.PhoneNumber!;
             var paxEmail = string.IsNullOrWhiteSpace(draft.Passenger?.EmailAddress) ? "N/A" : draft.Passenger!.EmailAddress!;
 
+            // Map enum -> label
+            static string StyleLabel(PickupStyle? s) => s switch
+            {
+                PickupStyle.MeetAndGreet => "Meet & Greet",
+                PickupStyle.Curbside => "Curbside",
+                _ => "Curbside"
+            };
+
+            var pickupStyleLabel = StyleLabel(draft.PickupStyle);
+            var pickupSign = draft.PickupStyle == PickupStyle.MeetAndGreet
+                ? (draft.PickupSignText ?? "").Trim()
+                : "";
+
+            var returnStyleLabel = draft.ReturnPickupStyle.HasValue ? StyleLabel(draft.ReturnPickupStyle) : null;
+            var returnSign = draft.ReturnPickupStyle == PickupStyle.MeetAndGreet
+                ? (draft.ReturnPickupSignText ?? "").Trim()
+                : null;
+
             var dropoffText = draft.AsDirected
                 ? "As Directed"
                 : (string.IsNullOrWhiteSpace(draft.DropoffLocation) ? "N/A" : draft.DropoffLocation);
 
-            var returnWhen = draft.ReturnPickupTime?.ToString("G"); // null => empty
+            var returnWhen = draft.ReturnPickupTime?.ToString("G"); 
             var returnPickupLoc = draft.DropoffLocation ?? draft.PickupLocation; // return pickup = outbound dropoff (or fallback)
 
             var builder = new BodyBuilder
@@ -57,15 +75,19 @@ namespace Bellwood.AdminApi.Services
             <p><b>Passenger:</b> {H(paxName)} &mdash; {H(paxPhone)} &mdash; {EmailLink(paxEmail)}</p>
 
             <p><b>Pickup:</b> {draft.PickupDateTime:G} — {H(draft.PickupLocation)}</p>
+            <p><b>Pickup Style:</b> {H(pickupStyleLabel)}{(string.IsNullOrWhiteSpace(pickupSign) ? "" : $" — Sign: {H(pickupSign)}")}</p>
             <p><b>Dropoff:</b> {H(dropoffText)}</p>
 
             <p><b>Vehicle:</b> {H(draft.VehicleClass)}</p>
             <p><b>Passengers/Luggage:</b> {draft.PassengerCount} pax, {draft.CheckedBags ?? 0} checked, {draft.CarryOnBags ?? 0} carry-on</p>
             <p><b>As Directed:</b> {draft.AsDirected} {(draft.AsDirected ? $"({draft.Hours}h)" : "")}</p>
             <p><b>Round Trip:</b> {draft.RoundTrip} {(draft.RoundTrip ? $"(Return {H(returnWhen)})" : "")}</p>
+
             {(draft.RoundTrip && draft.ReturnPickupTime is not null ? $@"
             <p><b>Return Pickup:</b> {H(returnWhen)} — {H(returnPickupLoc)}</p>
+            <p><b>Return Pickup Style:</b> {H(returnStyleLabel!)}{(string.IsNullOrWhiteSpace(returnSign) ? "" : $" — Sign: {H(returnSign)}")}</p>
             <p><b>Return Dropoff:</b> {H(draft.PickupLocation)}</p>" : "")}
+
             <p><b>Additional Request:</b> {H(draft.AdditionalRequest)} {(string.IsNullOrWhiteSpace(draft.AdditionalRequestOtherText) ? "" : $"— {H(draft.AdditionalRequestOtherText)}")}</p>
             <hr/>
             <pre>{WebUtility.HtmlEncode(json)}</pre>"
@@ -79,12 +101,14 @@ namespace Bellwood.AdminApi.Services
             Passenger: {paxName} - {paxPhone} - {paxEmail}
 
             Pickup: {draft.PickupDateTime:G} — {draft.PickupLocation}
+            Pickup Style: {pickupStyleLabel}{(string.IsNullOrWhiteSpace(pickupSign) ? "" : $" — Sign: {pickupSign}")}
             Dropoff: {dropoffText}
             Vehicle: {draft.VehicleClass}
             Passengers/Luggage: {draft.PassengerCount} pax, {draft.CheckedBags ?? 0} checked, {draft.CarryOnBags ?? 0} carry-on
             As Directed: {draft.AsDirected}{(draft.AsDirected ? $" ({draft.Hours}h)" : "")}
             Round Trip: {draft.RoundTrip}{(draft.RoundTrip ? $" (Return {returnWhen})" : "")}
             {(draft.RoundTrip && draft.ReturnPickupTime is not null ? $@"Return Pickup: {returnWhen} — {returnPickupLoc}
+            Return Pickup Style: {returnStyleLabel}{(string.IsNullOrWhiteSpace(returnSign) ? "" : $" — Sign: {returnSign}")}<br/>
             Return Dropoff: {draft.PickupLocation}
             " : "")}Additional Request: {draft.AdditionalRequest}{(string.IsNullOrWhiteSpace(draft.AdditionalRequestOtherText) ? "" : $" — {draft.AdditionalRequestOtherText}")}
 
