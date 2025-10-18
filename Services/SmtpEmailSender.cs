@@ -119,6 +119,17 @@ namespace Bellwood.AdminApi.Services
             var returnWhen = draft.ReturnPickupTime?.ToString("G"); 
             var returnPickupLoc = draft.DropoffLocation ?? draft.PickupLocation; // return pickup = outbound dropoff (or fallback)
 
+            string CapacityBlock(QuoteDraft d)
+            {
+                if (d.CapacityWithinLimits) return "";
+                var keepText = d.CapacityOverrideByUser
+                    ? "Booker chose to keep the current vehicle despite capacity limits."
+                    : "Please advise an upgrade with the booker.";
+                var suggestion = string.IsNullOrWhiteSpace(d.SuggestedVehicle) ? "" : $" Suggested: {WebUtility.HtmlEncode(d.SuggestedVehicle)}.";
+                var note = string.IsNullOrWhiteSpace(d.CapacityNote) ? "" : $" {WebUtility.HtmlEncode(d.CapacityNote)}";
+                return $@"<p style=""color:#d97706""><b>Capacity Warning:</b>{note}{suggestion} {WebUtility.HtmlEncode(keepText)}</p>";
+            }
+
             var builder = new BodyBuilder
             {
             HtmlBody = $@"
@@ -135,6 +146,8 @@ namespace Bellwood.AdminApi.Services
 
             <p><b>Vehicle:</b> {H(draft.VehicleClass)}</p>
             <p><b>Passengers/Luggage:</b> {draft.PassengerCount} pax, {draft.CheckedBags ?? 0} checked, {draft.CarryOnBags ?? 0} carry-on</p>
+            {CapacityBlock(draft)}
+
             <p><b>As Directed:</b> {draft.AsDirected} {(draft.AsDirected ? $"({draft.Hours}h)" : "")}</p>
             <p><b>Round Trip:</b> {draft.RoundTrip} {(draft.RoundTrip ? $"(Return {H(returnWhen)})" : "")}</p>
 
@@ -163,6 +176,8 @@ namespace Bellwood.AdminApi.Services
 
             Vehicle: {draft.VehicleClass}
             Passengers/Luggage: {draft.PassengerCount} pax, {draft.CheckedBags ?? 0} checked, {draft.CarryOnBags ?? 0} carry-on
+            {CapacityBlock(draft)}
+
             As Directed: {draft.AsDirected}{(draft.AsDirected ? $" ({draft.Hours}h)" : "")}
             Round Trip: {draft.RoundTrip}{(draft.RoundTrip ? $" (Return {returnWhen})" : "")}
             {(draft.RoundTrip && draft.ReturnPickupTime is not null ? $@"Return Pickup: {returnWhen} — {returnPickupLoc}
