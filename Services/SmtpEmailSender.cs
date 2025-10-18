@@ -41,6 +41,59 @@ namespace Bellwood.AdminApi.Services
             var paxPhone = string.IsNullOrWhiteSpace(draft.Passenger?.PhoneNumber) ? "N/A" : draft.Passenger!.PhoneNumber!;
             var paxEmail = string.IsNullOrWhiteSpace(draft.Passenger?.EmailAddress) ? "N/A" : draft.Passenger!.EmailAddress!;
 
+            var addlPax = (draft.AdditionalPassengers ?? new List<string>())
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToList();
+
+            string AddlPaxLineHtml() => 
+                addlPax.Count == 0 ? ""
+                : $"<p><b>Additional Passengers:</b> {H(string.Join(", ", addlPax))}</p>";
+
+            string AddlPaxLineText() =>
+                addlPax.Count == 0 ? ""
+                : $"Additional Passengers: {string.Join(", ", addlPax)}";
+
+            // Flight summary (Commercial vs Private) from the built QuoteDraft
+            string? outboundNumber = draft.OutboundFlight?.FlightNumber;
+            string? outboundTail = draft.OutboundFlight?.TailNumber;
+            string? returnNumber = draft.ReturnFlight?.FlightNumber;
+            string? returnTail = draft.ReturnFlight?.TailNumber;
+
+            bool hasAnyFlight = !string.IsNullOrWhiteSpace(outboundNumber) ||
+                                !string.IsNullOrWhiteSpace(outboundTail) ||
+                                !string.IsNullOrWhiteSpace(returnNumber) ||
+                                !string.IsNullOrWhiteSpace(returnTail);
+
+            string FlightHtml()
+            {
+                if (!hasAnyFlight) return "";
+                var sb = new System.Text.StringBuilder("<p><b>Flight Details:</b><br/>");
+                if (!string.IsNullOrWhiteSpace(outboundNumber)) sb.Append($"Outbound Flight #: {H(outboundNumber)}<br/>");
+                if (!string.IsNullOrWhiteSpace(outboundTail)) sb.Append($"Outbound Tail #: {H(outboundTail)}<br/>");
+                if (!string.IsNullOrWhiteSpace(returnNumber)) sb.Append($"Return Flight #: {H(returnNumber)}<br/>");
+                if (!string.IsNullOrWhiteSpace(returnTail)) sb.Append($"Return Tail #: {H(returnTail)}<br/>");
+
+                // If private tail is unchanged on return, make that explicit.
+                if (!string.IsNullOrWhiteSpace(outboundTail) && string.IsNullOrWhiteSpace(returnTail) && draft.RoundTrip)
+                    sb.Append("Return Aircraft: Same as outbound<br/>");
+
+                sb.Append("</p>");
+                return sb.ToString();
+            }
+
+            string FlightText()
+            {
+                if (!hasAnyFlight) return "";
+                var lines = new List<string> { "Flight Details:" };
+                if (!string.IsNullOrWhiteSpace(outboundNumber)) lines.Add($"  Outbound Flight #: {outboundNumber}");
+                if (!string.IsNullOrWhiteSpace(outboundTail)) lines.Add($"  Outbound Tail #: {outboundTail}");
+                if (!string.IsNullOrWhiteSpace(returnNumber)) lines.Add($"  Return Flight #: {returnNumber}");
+                if (!string.IsNullOrWhiteSpace(returnTail)) lines.Add($"  Return Tail #: {returnTail}");
+                if (!string.IsNullOrWhiteSpace(outboundTail) && string.IsNullOrWhiteSpace(returnTail) && draft.RoundTrip)
+                    lines.Add("  Return Aircraft: Same as outbound");
+                return string.Join("\n", lines) + "\n";
+            }
+
             // Map enum -> label
             static string StyleLabel(PickupStyle? s) => s switch
             {
@@ -73,10 +126,12 @@ namespace Bellwood.AdminApi.Services
             <p><b>Reference:</b> {H(referenceId)}</p>
             <p><b>Booker:</b> {H(bookerName)} &mdash; {H(bookerPhone)} &mdash; {EmailLink(bookerEmail)}</p>
             <p><b>Passenger:</b> {H(paxName)} &mdash; {H(paxPhone)} &mdash; {EmailLink(paxEmail)}</p>
+            {AddlPaxLineHtml()}
 
             <p><b>Pickup:</b> {draft.PickupDateTime:G} — {H(draft.PickupLocation)}</p>
             <p><b>Pickup Style:</b> {H(pickupStyleLabel)}{(string.IsNullOrWhiteSpace(pickupSign) ? "" : $" — Sign: {H(pickupSign)}")}</p>
             <p><b>Dropoff:</b> {H(dropoffText)}</p>
+            {FlightHtml()}
 
             <p><b>Vehicle:</b> {H(draft.VehicleClass)}</p>
             <p><b>Passengers/Luggage:</b> {draft.PassengerCount} pax, {draft.CheckedBags ?? 0} checked, {draft.CarryOnBags ?? 0} carry-on</p>
@@ -99,10 +154,13 @@ namespace Bellwood.AdminApi.Services
             Reference: {referenceId}
             Booker: {bookerName} - {bookerPhone} - {bookerEmail}
             Passenger: {paxName} - {paxPhone} - {paxEmail}
+            {AddlPaxLineText()}
 
             Pickup: {draft.PickupDateTime:G} — {draft.PickupLocation}
             Pickup Style: {pickupStyleLabel}{(string.IsNullOrWhiteSpace(pickupSign) ? "" : $" — Sign: {pickupSign}")}
             Dropoff: {dropoffText}
+            {FlightText()}
+
             Vehicle: {draft.VehicleClass}
             Passengers/Luggage: {draft.PassengerCount} pax, {draft.CheckedBags ?? 0} checked, {draft.CarryOnBags ?? 0} carry-on
             As Directed: {draft.AsDirected}{(draft.AsDirected ? $" ({draft.Hours}h)" : "")}
