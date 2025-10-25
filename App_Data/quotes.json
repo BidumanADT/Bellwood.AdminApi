@@ -1,0 +1,57 @@
+[
+  {
+    "Id": "2a3f1b460293466c8e1a837a3a2d18de",
+    "CreatedUtc": "2025-10-25T13:11:14.7511591Z",
+    "Status": 0,
+    "BookerName": "Alice Morgan",
+    "PassengerName": "Jordan Chen",
+    "VehicleClass": "Sedan",
+    "PickupLocation": "Signature FBO (ORD) - 825 Patton Drive, Chicago, IL 60666",
+    "DropoffLocation": "Home - 123 Wacker Dr, Chicago, IL",
+    "PickupDateTime": "2025-10-25T08:39:07.6955759-05:00",
+    "Draft": {
+      "Booker": {
+        "FirstName": "Alice",
+        "LastName": "Morgan",
+        "PhoneNumber": "312-555-7777",
+        "EmailAddress": "alice.morgan@example.com"
+      },
+      "Passenger": {
+        "FirstName": "Jordan",
+        "LastName": "Chen",
+        "PhoneNumber": "",
+        "EmailAddress": ""
+      },
+      "AdditionalPassengers": [],
+      "VehicleClass": "Sedan",
+      "PickupDateTime": "2025-10-25T08:39:07.6955759-05:00",
+      "PickupLocation": "Signature FBO (ORD) - 825 Patton Drive, Chicago, IL 60666",
+      "PickupStyle": 1,
+      "PickupSignText": "Chen - Sign Test",
+      "ReturnPickupStyle": 0,
+      "ReturnPickupSignText": null,
+      "AsDirected": false,
+      "Hours": null,
+      "DropoffLocation": "Home - 123 Wacker Dr, Chicago, IL",
+      "RoundTrip": true,
+      "ReturnPickupTime": "2025-10-27T10:39:07.6955759",
+      "OutboundFlight": {
+        "FlightNumber": null,
+        "TailNumber": "N111A"
+      },
+      "ReturnFlight": {
+        "FlightNumber": null,
+        "TailNumber": "N111A"
+      },
+      "PassengerCount": 3,
+      "CheckedBags": 2,
+      "CarryOnBags": 2,
+      "CapacityWithinLimits": false,
+      "CapacityNote": "Over capacity for Sedan: pax 3/2. Suggest SUV.",
+      "SuggestedVehicle": "SUV",
+      "CapacityOverrideByUser": true,
+      "AdditionalRequest": "Other",
+      "AdditionalRequestOtherText": "Bottled water"
+    }
+  }
+]
