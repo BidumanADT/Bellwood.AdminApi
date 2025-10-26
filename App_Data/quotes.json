@@ -1,8 +1,378 @@
 [
   {
+    "Id": "4a590990706f4c8396a260a4bb799bff",
+    "CreatedUtc": "2025-10-26T12:28:31.6904432Z",
+    "Status": "Closed",
+    "BookerName": "Sarah Larkin",
+    "PassengerName": "James Miller",
+    "VehicleClass": "SUV",
+    "PickupLocation": "O\u0027Hare FBO",
+    "DropoffLocation": "Langham Hotel",
+    "PickupDateTime": "2025-10-31T12:28:31.6896658Z",
+    "Draft": {
+      "Booker": {
+        "FirstName": "",
+        "LastName": "",
+        "PhoneNumber": null,
+        "EmailAddress": null
+      },
+      "Passenger": {
+        "FirstName": "",
+        "LastName": "",
+        "PhoneNumber": null,
+        "EmailAddress": null
+      },
+      "AdditionalPassengers": [],
+      "VehicleClass": "Sedan",
+      "PickupDateTime": "0001-01-01T00:00:00",
+      "PickupLocation": "",
+      "PickupStyle": "Curbside",
+      "PickupSignText": null,
+      "ReturnPickupStyle": null,
+      "ReturnPickupSignText": null,
+      "AsDirected": false,
+      "Hours": null,
+      "DropoffLocation": null,
+      "RoundTrip": false,
+      "ReturnPickupTime": null,
+      "OutboundFlight": {
+        "FlightNumber": null,
+        "TailNumber": null
+      },
+      "ReturnFlight": null,
+      "PassengerCount": 0,
+      "CheckedBags": null,
+      "CarryOnBags": null,
+      "CapacityWithinLimits": false,
+      "CapacityNote": null,
+      "SuggestedVehicle": null,
+      "CapacityOverrideByUser": false,
+      "AdditionalRequest": null,
+      "AdditionalRequestOtherText": null
+    }
+  },
+  {
+    "Id": "c49bf795d6534d06b5e88481e5b8a220",
+    "CreatedUtc": "2025-10-26T12:28:31.6904424Z",
+    "Status": "Rejected",
+    "BookerName": "Evan Ross",
+    "PassengerName": "Mia Park",
+    "VehicleClass": "Sprinter",
+    "PickupLocation": "Signature FBO (ORD)",
+    "DropoffLocation": "Indiana Dunes State Park",
+    "PickupDateTime": "2025-10-30T12:28:31.6896658Z",
+    "Draft": {
+      "Booker": {
+        "FirstName": "",
+        "LastName": "",
+        "PhoneNumber": null,
+        "EmailAddress": null
+      },
+      "Passenger": {
+        "FirstName": "",
+        "LastName": "",
+        "PhoneNumber": null,
+        "EmailAddress": null
+      },
+      "AdditionalPassengers": [],
+      "VehicleClass": "Sedan",
+      "PickupDateTime": "0001-01-01T00:00:00",
+      "PickupLocation": "",
+      "PickupStyle": "Curbside",
+      "PickupSignText": null,
+      "ReturnPickupStyle": null,
+      "ReturnPickupSignText": null,
+      "AsDirected": false,
+      "Hours": null,
+      "DropoffLocation": null,
+      "RoundTrip": false,
+      "ReturnPickupTime": null,
+      "OutboundFlight": {
+        "FlightNumber": null,
+        "TailNumber": null
+      },
+      "ReturnFlight": null,
+      "PassengerCount": 0,
+      "CheckedBags": null,
+      "CarryOnBags": null,
+      "CapacityWithinLimits": false,
+      "CapacityNote": null,
+      "SuggestedVehicle": null,
+      "CapacityOverrideByUser": false,
+      "AdditionalRequest": null,
+      "AdditionalRequestOtherText": null
+    }
+  },
+  {
+    "Id": "f5008d8ce8ef4bfe8fd9bd2eb4a00b82",
+    "CreatedUtc": "2025-10-26T12:28:31.6904415Z",
+    "Status": "Priced",
+    "BookerName": "Lisa Gomez",
+    "PassengerName": "Derek James",
+    "VehicleClass": "S-Class",
+    "PickupLocation": "Midway Airport",
+    "DropoffLocation": "The Langham Hotel",
+    "PickupDateTime": "2025-10-29T12:28:31.6896658Z",
+    "Draft": {
+      "Booker": {
+        "FirstName": "",
+        "LastName": "",
+        "PhoneNumber": null,
+        "EmailAddress": null
+      },
+      "Passenger": {
+        "FirstName": "",
+        "LastName": "",
+        "PhoneNumber": null,
+        "EmailAddress": null
+      },
+      "AdditionalPassengers": [],
+      "VehicleClass": "Sedan",
+      "PickupDateTime": "0001-01-01T00:00:00",
+      "PickupLocation": "",
+      "PickupStyle": "Curbside",
+      "PickupSignText": null,
+      "ReturnPickupStyle": null,
+      "ReturnPickupSignText": null,
+      "AsDirected": false,
+      "Hours": null,
+      "DropoffLocation": null,
+      "RoundTrip": false,
+      "ReturnPickupTime": null,
+      "OutboundFlight": {
+        "FlightNumber": null,
+        "TailNumber": null
+      },
+      "ReturnFlight": null,
+      "PassengerCount": 0,
+      "CheckedBags": null,
+      "CarryOnBags": null,
+      "CapacityWithinLimits": false,
+      "CapacityNote": null,
+      "SuggestedVehicle": null,
+      "CapacityOverrideByUser": false,
+      "AdditionalRequest": null,
+      "AdditionalRequestOtherText": null
+    }
+  },
+  {
+    "Id": "f998c328a2b944719a8e8700f3221ab7",
+    "CreatedUtc": "2025-10-26T12:28:31.6904403Z",
+    "Status": "InReview",
+    "BookerName": "Chris Bailey",
+    "PassengerName": "Jordan Chen",
+    "VehicleClass": "SUV",
+    "PickupLocation": "O\u0027Hare FBO",
+    "DropoffLocation": "Downtown Chicago",
+    "PickupDateTime": "2025-10-28T12:28:31.6896658Z",
+    "Draft": {
+      "Booker": {
+        "FirstName": "",
+        "LastName": "",
+        "PhoneNumber": null,
+        "EmailAddress": null
+      },
+      "Passenger": {
+        "FirstName": "",
+        "LastName": "",
+        "PhoneNumber": null,
+        "EmailAddress": null
+      },
+      "AdditionalPassengers": [],
+      "VehicleClass": "Sedan",
+      "PickupDateTime": "0001-01-01T00:00:00",
+      "PickupLocation": "",
+      "PickupStyle": "Curbside",
+      "PickupSignText": null,
+      "ReturnPickupStyle": null,
+      "ReturnPickupSignText": null,
+      "AsDirected": false,
+      "Hours": null,
+      "DropoffLocation": null,
+      "RoundTrip": false,
+      "ReturnPickupTime": null,
+      "OutboundFlight": {
+        "FlightNumber": null,
+        "TailNumber": null
+      },
+      "ReturnFlight": null,
+      "PassengerCount": 0,
+      "CheckedBags": null,
+      "CarryOnBags": null,
+      "CapacityWithinLimits": false,
+      "CapacityNote": null,
+      "SuggestedVehicle": null,
+      "CapacityOverrideByUser": false,
+      "AdditionalRequest": null,
+      "AdditionalRequestOtherText": null
+    }
+  },
+  {
+    "Id": "52dd37d2226f4cebbec018c3787018c8",
+    "CreatedUtc": "2025-10-26T12:28:31.6902721Z",
+    "Status": "Submitted",
+    "BookerName": "Alice Morgan",
+    "PassengerName": "Taylor Reed",
+    "VehicleClass": "Sedan",
+    "PickupLocation": "Langham Hotel, Chicago",
+    "DropoffLocation": "O\u0027Hare International Airport",
+    "PickupDateTime": "2025-10-27T12:28:31.6896658Z",
+    "Draft": {
+      "Booker": {
+        "FirstName": "",
+        "LastName": "",
+        "PhoneNumber": null,
+        "EmailAddress": null
+      },
+      "Passenger": {
+        "FirstName": "",
+        "LastName": "",
+        "PhoneNumber": null,
+        "EmailAddress": null
+      },
+      "AdditionalPassengers": [],
+      "VehicleClass": "Sedan",
+      "PickupDateTime": "0001-01-01T00:00:00",
+      "PickupLocation": "",
+      "PickupStyle": "Curbside",
+      "PickupSignText": null,
+      "ReturnPickupStyle": null,
+      "ReturnPickupSignText": null,
+      "AsDirected": false,
+      "Hours": null,
+      "DropoffLocation": null,
+      "RoundTrip": false,
+      "ReturnPickupTime": null,
+      "OutboundFlight": {
+        "FlightNumber": null,
+        "TailNumber": null
+      },
+      "ReturnFlight": null,
+      "PassengerCount": 0,
+      "CheckedBags": null,
+      "CarryOnBags": null,
+      "CapacityWithinLimits": false,
+      "CapacityNote": null,
+      "SuggestedVehicle": null,
+      "CapacityOverrideByUser": false,
+      "AdditionalRequest": null,
+      "AdditionalRequestOtherText": null
+    }
+  },
+  {
+    "Id": "a37c918674ac4acf8b17efae92cc809a",
+    "CreatedUtc": "2025-10-25T21:10:24.6912576Z",
+    "Status": "Submitted",
+    "BookerName": "Alice Morgan",
+    "PassengerName": "Taylor Reed",
+    "VehicleClass": "Sedan",
+    "PickupLocation": "Langham Hotel, Chicago",
+    "DropoffLocation": "O\u0027Hare International Airport",
+    "PickupDateTime": "2025-10-26T21:10:24.6912486Z",
+    "Draft": {
+      "Booker": {
+        "FirstName": "",
+        "LastName": "",
+        "PhoneNumber": null,
+        "EmailAddress": null
+      },
+      "Passenger": {
+        "FirstName": "",
+        "LastName": "",
+        "PhoneNumber": null,
+        "EmailAddress": null
+      },
+      "AdditionalPassengers": [],
+      "VehicleClass": "Sedan",
+      "PickupDateTime": "0001-01-01T00:00:00",
+      "PickupLocation": "",
+      "PickupStyle": "Curbside",
+      "PickupSignText": null,
+      "ReturnPickupStyle": null,
+      "ReturnPickupSignText": null,
+      "AsDirected": false,
+      "Hours": null,
+      "DropoffLocation": null,
+      "RoundTrip": false,
+      "ReturnPickupTime": null,
+      "OutboundFlight": {
+        "FlightNumber": null,
+        "TailNumber": null
+      },
+      "ReturnFlight": null,
+      "PassengerCount": 0,
+      "CheckedBags": null,
+      "CarryOnBags": null,
+      "CapacityWithinLimits": false,
+      "CapacityNote": null,
+      "SuggestedVehicle": null,
+      "CapacityOverrideByUser": false,
+      "AdditionalRequest": null,
+      "AdditionalRequestOtherText": null
+    }
+  },
+  {
+    "Id": "b135255952fd423190618fba06c788bf",
+    "CreatedUtc": "2025-10-25T13:50:09.2234264Z",
+    "Status": "Submitted",
+    "BookerName": "Alice Morgan",
+    "PassengerName": "Taylor Reed",
+    "VehicleClass": "Sedan",
+    "PickupLocation": "O\u0027Hare - O\u0027Hare International Airport, Chicago, IL",
+    "DropoffLocation": "Langham - 330 N Wabash Ave, Chicago, IL",
+    "PickupDateTime": "2025-10-25T09:17:42.298629-05:00",
+    "Draft": {
+      "Booker": {
+        "FirstName": "Alice",
+        "LastName": "Morgan",
+        "PhoneNumber": "312-555-7777",
+        "EmailAddress": "alice.morgan@example.com"
+      },
+      "Passenger": {
+        "FirstName": "Taylor",
+        "LastName": "Reed",
+        "PhoneNumber": "773-555-1122",
+        "EmailAddress": "taylor.reed@example.com"
+      },
+      "AdditionalPassengers": [
+        "AddPax One",
+        "AddPax Two"
+      ],
+      "VehicleClass": "Sedan",
+      "PickupDateTime": "2025-10-25T09:17:42.298629-05:00",
+      "PickupLocation": "O\u0027Hare - O\u0027Hare International Airport, Chicago, IL",
+      "PickupStyle": "MeetAndGreet",
+      "PickupSignText": "Reed - Sign Test",
+      "ReturnPickupStyle": "Curbside",
+      "ReturnPickupSignText": null,
+      "AsDirected": false,
+      "Hours": null,
+      "DropoffLocation": "Langham - 330 N Wabash Ave, Chicago, IL",
+      "RoundTrip": true,
+      "ReturnPickupTime": "2025-10-28T11:17:42.298629",
+      "OutboundFlight": {
+        "FlightNumber": "AAL1234",
+        "TailNumber": null
+      },
+      "ReturnFlight": {
+        "FlightNumber": "TBD",
+        "TailNumber": null
+      },
+      "PassengerCount": 3,
+      "CheckedBags": 0,
+      "CarryOnBags": 0,
+      "CapacityWithinLimits": false,
+      "CapacityNote": "Over capacity for Sedan: pax 3/2. Suggest SUV.",
+      "SuggestedVehicle": "SUV",
+      "CapacityOverrideByUser": true,
+      "AdditionalRequest": null,
+      "AdditionalRequestOtherText": null
+    }
+  },
+  {
     "Id": "2a3f1b460293466c8e1a837a3a2d18de",
     "CreatedUtc": "2025-10-25T13:11:14.7511591Z",
-    "Status": 0,
+    "Status": "Submitted",
     "BookerName": "Alice Morgan",
     "PassengerName": "Jordan Chen",
     "VehicleClass": "Sedan",
@@ -26,9 +396,9 @@
       "VehicleClass": "Sedan",
       "PickupDateTime": "2025-10-25T08:39:07.6955759-05:00",
       "PickupLocation": "Signature FBO (ORD) - 825 Patton Drive, Chicago, IL 60666",
-      "PickupStyle": 1,
+      "PickupStyle": "MeetAndGreet",
       "PickupSignText": "Chen - Sign Test",
-      "ReturnPickupStyle": 0,
+      "ReturnPickupStyle": "Curbside",
       "ReturnPickupSignText": null,
       "AsDirected": false,
       "Hours": null,
