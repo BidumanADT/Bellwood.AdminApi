@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using Bellwood.AdminApi.Models;
+using System.Text.Json.Serialization;
 
 namespace Bellwood.AdminApi.Services;
 
@@ -7,7 +8,16 @@ public sealed class FileQuoteRepository : IQuoteRepository
 {
     private readonly string _filePath;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private static readonly JsonSerializerOptions _opts = new() { WriteIndented = true };
+
+    private static readonly JsonSerializerOptions _opts = new()
+    {
+        WriteIndented = true,
+        Converters =
+        {
+            new JsonStringEnumConverter(),
+            new QuoteStatusFlexConverter() 
+        }
+    };
 
     public FileQuoteRepository(IHostEnvironment env)
     {
@@ -53,7 +63,7 @@ public sealed class FileQuoteRepository : IQuoteRepository
     private async Task<List<QuoteRecord>> ReadAllAsync()
     {
         using var fs = File.OpenRead(_filePath);
-        var list = await JsonSerializer.DeserializeAsync<List<QuoteRecord>>(fs) ?? new();
+        var list = await JsonSerializer.DeserializeAsync<List<QuoteRecord>>(fs, _opts) ?? new();
         return list;
     }
 
