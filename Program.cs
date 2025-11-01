@@ -34,7 +34,7 @@ var app = builder.Build();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
-// Optional API key protection (same as you had)
+// Optional API key protection 
 string? apiKey = builder.Configuration["Email:ApiKey"];
 static IResult UnauthorizedIfKeyMissing(HttpRequest req, string? configuredKey)
 {
@@ -44,70 +44,126 @@ static IResult UnauthorizedIfKeyMissing(HttpRequest req, string? configuredKey)
     return Results.Ok();
 }
 
-// ---- Seed: create real, persistent records via repository ----
-app.MapPost("/seed-test-quotes", async (IQuoteRepository repo) =>
+// --- DEV ONLY: seed a few quotes into the repository ---
+app.MapPost("/quotes/seed", async (IQuoteRepository repo) =>
 {
     var now = DateTime.UtcNow;
+
     var samples = new[]
     {
-        new QuoteRecord
-        {
+        new QuoteRecord {
+            CreatedUtc = now,
+            Status = QuoteStatus.Submitted,
             BookerName = "Alice Morgan",
             PassengerName = "Taylor Reed",
             VehicleClass = "Sedan",
             PickupLocation = "Langham Hotel, Chicago",
             DropoffLocation = "O'Hare International Airport",
             PickupDateTime = now.AddDays(1),
-            Status = QuoteStatus.Submitted
+            Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
+                Booker = new() { FirstName = "Alice", LastName = "Morgan", PhoneNumber = "312-555-7777", EmailAddress = "alice.morgan@example.com" },
+                Passenger = new() { FirstName = "Taylor", LastName = "Reed", PhoneNumber = "773-555-1122", EmailAddress = "taylor.reed@example.com" },
+                VehicleClass = "Sedan",
+                PickupDateTime = now.AddDays(1),
+                PickupLocation = "Langham Hotel, Chicago",
+                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
+                AsDirected = false,
+                DropoffLocation = "O'Hare International Airport",
+                RoundTrip = false,
+                PassengerCount = 2, CheckedBags = 2, CarryOnBags = 1
+            }
         },
-        new QuoteRecord
-        {
+        new QuoteRecord {
+            CreatedUtc = now.AddMinutes(-10),
+            Status = QuoteStatus.InReview, // should show as "Pending"
             BookerName = "Chris Bailey",
             PassengerName = "Jordan Chen",
             VehicleClass = "SUV",
             PickupLocation = "O'Hare FBO",
             DropoffLocation = "Downtown Chicago",
             PickupDateTime = now.AddDays(2),
-            Status = QuoteStatus.InReview   // maps to Pending in the app
+            Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
+                Booker = new() { FirstName="Chris", LastName="Bailey" },
+                Passenger = new() { FirstName="Jordan", LastName="Chen" },
+                VehicleClass = "SUV",
+                PickupDateTime = now.AddDays(2),
+                PickupLocation = "O'Hare FBO",
+                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.MeetAndGreet,
+                PickupSignText = "CHEN / Bellwood",
+                DropoffLocation = "Downtown Chicago",
+                PassengerCount = 3, CheckedBags = 3, CarryOnBags = 2
+            }
         },
-        new QuoteRecord
-        {
+        new QuoteRecord {
+            CreatedUtc = now.AddHours(-1),
+            Status = QuoteStatus.Priced,
             BookerName = "Lisa Gomez",
             PassengerName = "Derek James",
             VehicleClass = "S-Class",
             PickupLocation = "Midway Airport",
             DropoffLocation = "The Langham Hotel",
             PickupDateTime = now.AddDays(3),
-            Status = QuoteStatus.Priced
+            Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
+                Booker = new() { FirstName="Lisa", LastName="Gomez" },
+                Passenger = new() { FirstName="Derek", LastName="James" },
+                VehicleClass = "S-Class",
+                PickupDateTime = now.AddDays(3),
+                PickupLocation = "Midway Airport",
+                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
+                DropoffLocation = "The Langham Hotel",
+                PassengerCount = 2
+            }
         },
-        new QuoteRecord
-        {
+        new QuoteRecord {
+            CreatedUtc = now.AddHours(-2),
+            Status = QuoteStatus.Rejected,
             BookerName = "Evan Ross",
             PassengerName = "Mia Park",
             VehicleClass = "Sprinter",
             PickupLocation = "Signature FBO (ORD)",
             DropoffLocation = "Indiana Dunes State Park",
             PickupDateTime = now.AddDays(4),
-            Status = QuoteStatus.Rejected
+            Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
+                Booker = new() { FirstName="Evan", LastName="Ross" },
+                Passenger = new() { FirstName="Mia", LastName="Park" },
+                VehicleClass = "Sprinter",
+                PickupDateTime = now.AddDays(4),
+                PickupLocation = "Signature FBO (ORD)",
+                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.MeetAndGreet,
+                PickupSignText = "PARK / Bellwood",
+                DropoffLocation = "Indiana Dunes State Park",
+                PassengerCount = 6, CheckedBags = 4, CarryOnBags = 6
+            }
         },
-        new QuoteRecord
-        {
+        new QuoteRecord {
+            CreatedUtc = now.AddHours(-3),
+            Status = QuoteStatus.Closed,
             BookerName = "Sarah Larkin",
             PassengerName = "James Miller",
             VehicleClass = "SUV",
             PickupLocation = "O'Hare FBO",
             DropoffLocation = "Langham Hotel",
             PickupDateTime = now.AddDays(5),
-            Status = QuoteStatus.Closed
+            Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
+                Booker = new() { FirstName="Sarah", LastName="Larkin" },
+                Passenger = new() { FirstName="James", LastName="Miller" },
+                VehicleClass = "SUV",
+                PickupDateTime = now.AddDays(5),
+                PickupLocation = "O'Hare FBO",
+                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
+                DropoffLocation = "Langham Hotel",
+                PassengerCount = 4
+            }
         }
     };
 
-    // Persist each one (your interface doesn’t have AddMany)
-    foreach (var s in samples)
-        await repo.AddAsync(s);
+    foreach (var r in samples)
+        await repo.AddAsync(r);
 
     return Results.Ok(new { added = samples.Length });
-});
+})
+.WithName("SeedQuotes");
+
 
 // ---- Submit Quote: remove IQuoteStore; use repository only ----
 app.MapPost("/quotes", async (
