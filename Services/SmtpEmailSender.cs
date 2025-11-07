@@ -1,12 +1,12 @@
-﻿using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Threading.Tasks;
-using BellwoodGlobal.Mobile.Models;
-using System.Net;
+﻿using BellwoodGlobal.Mobile.Models;
 using MailKit.Net.Smtp;
 using MailKit.Security;
 using Microsoft.Extensions.Options;
 using MimeKit;
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Bellwood.AdminApi.Services
 {
@@ -21,6 +21,10 @@ namespace Bellwood.AdminApi.Services
 
         public SmtpEmailSender(IOptions<EmailOptions> opt) => _opt = opt.Value;
 
+        // ===================================================================
+        // PUBLIC METHODS
+        // ===================================================================
+
         public async Task SendQuoteAsync(QuoteDraft draft, string referenceId)
         {
             var msg = new MimeMessage();
@@ -28,168 +32,112 @@ namespace Bellwood.AdminApi.Services
             msg.To.Add(MailboxAddress.Parse(_opt.To));
             msg.Subject = $"{_opt.SubjectPrefix} {referenceId} - {draft.Passenger} / {draft.VehicleClass}";
 
-            var json = JsonSerializer.Serialize(draft, _jsonOpts);
-            string H(string? s) => WebUtility.HtmlEncode(s ?? "");
-            string EmailLink(string s) => s == "N/A" ? s : $@"<a href=""mailto:{H(s)}"">{H(s)}</a>";
-
-
-            var bookerName  = draft.Booker?.ToString() ?? "Unknown";
-            var bookerPhone = string.IsNullOrWhiteSpace(draft.Booker?.PhoneNumber) ? "N/A" : draft.Booker!.PhoneNumber!;
-            var bookerEmail = string.IsNullOrWhiteSpace(draft.Booker?.EmailAddress) ? "N/A" : draft.Booker!.EmailAddress!;
-
-            var paxName  = draft.Passenger?.ToString() ?? "Unknown";
-            var paxPhone = string.IsNullOrWhiteSpace(draft.Passenger?.PhoneNumber) ? "N/A" : draft.Passenger!.PhoneNumber!;
-            var paxEmail = string.IsNullOrWhiteSpace(draft.Passenger?.EmailAddress) ? "N/A" : draft.Passenger!.EmailAddress!;
-
-            var addlPax = (draft.AdditionalPassengers ?? new List<string>())
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .ToList();
-
-            string AddlPaxLineHtml() => 
-                addlPax.Count == 0 ? ""
-                : $"<p><b>Additional Passengers:</b> {H(string.Join(", ", addlPax))}</p>";
-
-            string AddlPaxLineText() =>
-                addlPax.Count == 0 ? ""
-                : $"Additional Passengers: {string.Join(", ", addlPax)}";
-
-            // Flight summary (Commercial vs Private) from the built QuoteDraft
-            string? outboundNumber = draft.OutboundFlight?.FlightNumber;
-            string? outboundTail = draft.OutboundFlight?.TailNumber;
-            string? returnNumber = draft.ReturnFlight?.FlightNumber;
-            string? returnTail = draft.ReturnFlight?.TailNumber;
-
-            bool hasAnyFlight = !string.IsNullOrWhiteSpace(outboundNumber) ||
-                                !string.IsNullOrWhiteSpace(outboundTail) ||
-                                !string.IsNullOrWhiteSpace(returnNumber) ||
-                                !string.IsNullOrWhiteSpace(returnTail);
-
-            string FlightHtml()
-            {
-                if (!hasAnyFlight) return "";
-                var sb = new System.Text.StringBuilder("<p><b>Flight Details:</b><br/>");
-                if (!string.IsNullOrWhiteSpace(outboundNumber)) sb.Append($"Outbound Flight #: {H(outboundNumber)}<br/>");
-                if (!string.IsNullOrWhiteSpace(outboundTail)) sb.Append($"Outbound Tail #: {H(outboundTail)}<br/>");
-                if (!string.IsNullOrWhiteSpace(returnNumber)) sb.Append($"Return Flight #: {H(returnNumber)}<br/>");
-                if (!string.IsNullOrWhiteSpace(returnTail)) sb.Append($"Return Tail #: {H(returnTail)}<br/>");
-
-                // If private tail is unchanged on return, make that explicit.
-                if (!string.IsNullOrWhiteSpace(outboundTail) && string.IsNullOrWhiteSpace(returnTail) && draft.RoundTrip)
-                    sb.Append("Return Aircraft: Same as outbound<br/>");
-
-                sb.Append("</p>");
-                return sb.ToString();
-            }
-
-            string FlightText()
-            {
-                if (!hasAnyFlight) return "";
-                var lines = new List<string> { "Flight Details:" };
-                if (!string.IsNullOrWhiteSpace(outboundNumber)) lines.Add($"  Outbound Flight #: {outboundNumber}");
-                if (!string.IsNullOrWhiteSpace(outboundTail)) lines.Add($"  Outbound Tail #: {outboundTail}");
-                if (!string.IsNullOrWhiteSpace(returnNumber)) lines.Add($"  Return Flight #: {returnNumber}");
-                if (!string.IsNullOrWhiteSpace(returnTail)) lines.Add($"  Return Tail #: {returnTail}");
-                if (!string.IsNullOrWhiteSpace(outboundTail) && string.IsNullOrWhiteSpace(returnTail) && draft.RoundTrip)
-                    lines.Add("  Return Aircraft: Same as outbound");
-                return string.Join("\n", lines) + "\n";
-            }
-
-            // Map enum -> label
-            static string StyleLabel(PickupStyle? s) => s switch
-            {
-                PickupStyle.MeetAndGreet => "Meet & Greet",
-                PickupStyle.Curbside => "Curbside",
-                _ => "Curbside"
-            };
-
-            var pickupStyleLabel = StyleLabel(draft.PickupStyle);
-            var pickupSign = draft.PickupStyle == PickupStyle.MeetAndGreet
-                ? (draft.PickupSignText ?? "").Trim()
-                : "";
-
-            var returnStyleLabel = draft.ReturnPickupStyle.HasValue ? StyleLabel(draft.ReturnPickupStyle) : null;
-            var returnSign = draft.ReturnPickupStyle == PickupStyle.MeetAndGreet
-                ? (draft.ReturnPickupSignText ?? "").Trim()
-                : null;
-
-            var dropoffText = draft.AsDirected
-                ? "As Directed"
-                : (string.IsNullOrWhiteSpace(draft.DropoffLocation) ? "N/A" : draft.DropoffLocation);
-
-            var returnWhen = draft.ReturnPickupTime?.ToString("G"); 
-            var returnPickupLoc = draft.DropoffLocation ?? draft.PickupLocation; // return pickup = outbound dropoff (or fallback)
-
-            string CapacityBlock(QuoteDraft d)
-            {
-                if (d.CapacityWithinLimits) return "";
-                var keepText = d.CapacityOverrideByUser
-                    ? "Booker chose to keep the current vehicle despite capacity limits."
-                    : "Please advise an upgrade with the booker.";
-                var suggestion = string.IsNullOrWhiteSpace(d.SuggestedVehicle) ? "" : $" Suggested: {WebUtility.HtmlEncode(d.SuggestedVehicle)}.";
-                var note = string.IsNullOrWhiteSpace(d.CapacityNote) ? "" : $" {WebUtility.HtmlEncode(d.CapacityNote)}";
-                return $@"<p style=""color:#d97706""><b>Capacity Warning:</b>{note}{suggestion} {WebUtility.HtmlEncode(keepText)}</p>";
-            }
-
+            var context = new EmailContext(draft, referenceId);
             var builder = new BodyBuilder
             {
-            HtmlBody = $@"
-            <h3>Bellwood Elite — New Quote</h3>
-            <p><b>Reference:</b> {H(referenceId)}</p>
-            <p><b>Booker:</b> {H(bookerName)} &mdash; {H(bookerPhone)} &mdash; {EmailLink(bookerEmail)}</p>
-            <p><b>Passenger:</b> {H(paxName)} &mdash; {H(paxPhone)} &mdash; {EmailLink(paxEmail)}</p>
-            {AddlPaxLineHtml()}
-
-            <p><b>Pickup:</b> {draft.PickupDateTime:G} — {H(draft.PickupLocation)}</p>
-            <p><b>Pickup Style:</b> {H(pickupStyleLabel)}{(string.IsNullOrWhiteSpace(pickupSign) ? "" : $" — Sign: {H(pickupSign)}")}</p>
-            <p><b>Dropoff:</b> {H(dropoffText)}</p>
-            {FlightHtml()}
-
-            <p><b>Vehicle:</b> {H(draft.VehicleClass)}</p>
-            <p><b>Passengers/Luggage:</b> {draft.PassengerCount} pax, {draft.CheckedBags ?? 0} checked, {draft.CarryOnBags ?? 0} carry-on</p>
-            {CapacityBlock(draft)}
-
-            <p><b>As Directed:</b> {draft.AsDirected} {(draft.AsDirected ? $"({draft.Hours}h)" : "")}</p>
-            <p><b>Round Trip:</b> {draft.RoundTrip} {(draft.RoundTrip ? $"(Return {H(returnWhen)})" : "")}</p>
-
-            {(draft.RoundTrip && draft.ReturnPickupTime is not null ? $@"
-            <p><b>Return Pickup:</b> {H(returnWhen)} — {H(returnPickupLoc)}</p>
-            <p><b>Return Pickup Style:</b> {H(returnStyleLabel!)}{(string.IsNullOrWhiteSpace(returnSign) ? "" : $" — Sign: {H(returnSign)}")}</p>
-            <p><b>Return Dropoff:</b> {H(draft.PickupLocation)}</p>" : "")}
-
-            <p><b>Additional Request:</b> {H(draft.AdditionalRequest)} {(string.IsNullOrWhiteSpace(draft.AdditionalRequestOtherText) ? "" : $"— {H(draft.AdditionalRequestOtherText)}")}</p>
-            <hr/>
-            <pre>{WebUtility.HtmlEncode(json)}</pre>"
+                HtmlBody = BuildQuoteHtmlBody(context),
+                TextBody = BuildQuoteTextBody(context)
             };
 
+            msg.Body = builder.ToMessageBody();
+            await SendEmailAsync(msg);
+        }
 
-            builder.TextBody =
-            $@"Bellwood Elite — New Quote
-            Reference: {referenceId}
-            Booker: {bookerName} - {bookerPhone} - {bookerEmail}
-            Passenger: {paxName} - {paxPhone} - {paxEmail}
-            {AddlPaxLineText()}
+        public async Task SendBookingAsync(QuoteDraft draft, string referenceId)
+        {
+            var msg = new MimeMessage();
+            msg.From.Add(MailboxAddress.Parse(_opt.From));
+            msg.To.Add(MailboxAddress.Parse(_opt.To));
+            msg.Subject = $"Bellwood Elite - New Booking Request - {draft.PickupDateTime:MMM dd, yyyy @ h:mm tt} - {draft.Passenger}";
 
-            Pickup: {draft.PickupDateTime:G} — {draft.PickupLocation}
-            Pickup Style: {pickupStyleLabel}{(string.IsNullOrWhiteSpace(pickupSign) ? "" : $" — Sign: {pickupSign}")}
-            Dropoff: {dropoffText}
-            {FlightText()}
-
-            Vehicle: {draft.VehicleClass}
-            Passengers/Luggage: {draft.PassengerCount} pax, {draft.CheckedBags ?? 0} checked, {draft.CarryOnBags ?? 0} carry-on
-            {CapacityBlock(draft)}
-
-            As Directed: {draft.AsDirected}{(draft.AsDirected ? $" ({draft.Hours}h)" : "")}
-            Round Trip: {draft.RoundTrip}{(draft.RoundTrip ? $" (Return {returnWhen})" : "")}
-            {(draft.RoundTrip && draft.ReturnPickupTime is not null ? $@"Return Pickup: {returnWhen} — {returnPickupLoc}
-            Return Pickup Style: {returnStyleLabel}{(string.IsNullOrWhiteSpace(returnSign) ? "" : $" — Sign: {returnSign}")}<br/>
-            Return Dropoff: {draft.PickupLocation}
-            " : "")}Additional Request: {draft.AdditionalRequest}{(string.IsNullOrWhiteSpace(draft.AdditionalRequestOtherText) ? "" : $" — {draft.AdditionalRequestOtherText}")}
-
-            JSON:
-            {json}";
+            var context = new EmailContext(draft, referenceId);
+            var builder = new BodyBuilder
+            {
+                HtmlBody = BuildBookingHtmlBody(context),
+                TextBody = BuildBookingTextBody(context)
+            };
 
             msg.Body = builder.ToMessageBody();
+            await SendEmailAsync(msg);
+        }
 
+        // ===================================================================
+        // EMAIL BODY BUILDERS - QUOTE
+        // ===================================================================
+
+        private static string BuildQuoteHtmlBody(EmailContext ctx)
+        {
+            return $@"
+            <h3>Bellwood Elite — New Quote</h3>
+            <p><b>Reference:</b> {ctx.H(ctx.ReferenceId)}</p>
+            {ctx.BuildContactSectionHtml()}
+            {ctx.BuildTripDetailsHtml()}
+            {ctx.BuildVehicleAndCapacityHtml()}
+            {ctx.BuildServiceOptionsHtml()}
+            {ctx.BuildReturnTripHtml()}
+            <p><b>Additional Request:</b> {ctx.H(ctx.Draft.AdditionalRequest)} {ctx.BuildAdditionalRequestOtherHtml()}</p>
+            <hr/>
+            <pre>{WebUtility.HtmlEncode(ctx.Json)}</pre>";
+        }
+
+        private static string BuildQuoteTextBody(EmailContext ctx)
+        {
+            return $@"Bellwood Elite — New Quote
+            Reference: {ctx.ReferenceId}
+            {ctx.BuildContactSectionText()}
+            {ctx.BuildTripDetailsText()}
+            {ctx.BuildVehicleAndCapacityText()}
+            {ctx.BuildServiceOptionsText()}
+            {ctx.BuildReturnTripText()}
+            Additional Request: {ctx.Draft.AdditionalRequest}{ctx.BuildAdditionalRequestOtherText()}
+
+            JSON:
+            {ctx.Json}";
+        }
+
+        // ===================================================================
+        // EMAIL BODY BUILDERS - BOOKING
+        // ===================================================================
+
+        private static string BuildBookingHtmlBody(EmailContext ctx)
+        {
+            return $@"
+                <h3 style=""color:#CBA135"">Bellwood Elite — IMMEDIATE BOOKING REQUEST</h3>
+                <p style=""background:#FFF3CD; padding:8px; border-left:4px solid #CBA135;""><b>⚠ ACTION REQUIRED:</b> Customer is requesting immediate booking confirmation.</p>
+                <p><b>Reference:</b> {ctx.H(ctx.ReferenceId)}</p>
+                {ctx.BuildContactSectionHtml()}
+                {ctx.BuildTripDetailsHtml()}
+                {ctx.BuildVehicleAndCapacityHtml()}
+                {ctx.BuildServiceOptionsHtml()}
+                {ctx.BuildReturnTripHtml()}
+                <p><b>Additional Request:</b> {ctx.H(ctx.Draft.AdditionalRequest)} {ctx.BuildAdditionalRequestOtherHtml()}</p>
+                <hr/>
+                <pre>{WebUtility.HtmlEncode(ctx.Json)}</pre>";
+        }
+
+        private static string BuildBookingTextBody(EmailContext ctx)
+        {
+            return $@"Bellwood Elite — IMMEDIATE BOOKING REQUEST
+                ⚠ ACTION REQUIRED: Customer is requesting immediate booking confirmation.
+
+                Reference: {ctx.ReferenceId}
+                {ctx.BuildContactSectionText()}
+                {ctx.BuildTripDetailsText()}
+                {ctx.BuildVehicleAndCapacityText()}
+                {ctx.BuildServiceOptionsText()}
+                {ctx.BuildReturnTripText()}
+                Additional Request: {ctx.Draft.AdditionalRequest}{ctx.BuildAdditionalRequestOtherText()}
+
+                JSON:
+                {ctx.Json}";
+        }
+
+        // ===================================================================
+        // SMTP CONNECTION
+        // ===================================================================
+
+        private async Task SendEmailAsync(MimeMessage msg)
+        {
             using var smtp = new SmtpClient();
             await smtp.ConnectAsync(_opt.Host, _opt.Port,
                 _opt.UseStartTls ? SecureSocketOptions.StartTls : SecureSocketOptions.Auto);
@@ -199,6 +147,238 @@ namespace Bellwood.AdminApi.Services
 
             await smtp.SendAsync(msg);
             await smtp.DisconnectAsync(true);
+        }
+
+        // ===================================================================
+        // EMAIL CONTEXT HELPER CLASS
+        // ===================================================================
+
+        private sealed class EmailContext
+        {
+            public QuoteDraft Draft { get; }
+            public string ReferenceId { get; }
+            public string Json { get; }
+
+            // Contact info
+            public string BookerName { get; }
+            public string BookerPhone { get; }
+            public string BookerEmail { get; }
+            public string PassengerName { get; }
+            public string PassengerPhone { get; }
+            public string PassengerEmail { get; }
+            public List<string> AdditionalPassengers { get; }
+
+            // Flight info
+            public string? OutboundFlightNumber { get; }
+            public string? OutboundTailNumber { get; }
+            public string? ReturnFlightNumber { get; }
+            public string? ReturnTailNumber { get; }
+            public bool HasAnyFlight { get; }
+
+            // Pickup/Dropoff info
+            public string PickupStyleLabel { get; }
+            public string PickupSign { get; }
+            public string? ReturnStyleLabel { get; }
+            public string? ReturnSign { get; }
+            public string DropoffText { get; }
+            public string? ReturnWhen { get; }
+            public string ReturnPickupLocation { get; }
+
+            public EmailContext(QuoteDraft draft, string referenceId)
+            {
+                Draft = draft;
+                ReferenceId = referenceId;
+                Json = JsonSerializer.Serialize(draft, _jsonOpts);
+
+                // Extract contact info
+                BookerName = draft.Booker?.ToString() ?? "Unknown";
+                BookerPhone = string.IsNullOrWhiteSpace(draft.Booker?.PhoneNumber) ? "N/A" : draft.Booker!.PhoneNumber!;
+                BookerEmail = string.IsNullOrWhiteSpace(draft.Booker?.EmailAddress) ? "N/A" : draft.Booker!.EmailAddress!;
+                PassengerName = draft.Passenger?.ToString() ?? "Unknown";
+                PassengerPhone = string.IsNullOrWhiteSpace(draft.Passenger?.PhoneNumber) ? "N/A" : draft.Passenger!.PhoneNumber!;
+                PassengerEmail = string.IsNullOrWhiteSpace(draft.Passenger?.EmailAddress) ? "N/A" : draft.Passenger!.EmailAddress!;
+                AdditionalPassengers = (draft.AdditionalPassengers ?? new List<string>())
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .ToList();
+
+                // Extract flight info
+                OutboundFlightNumber = draft.OutboundFlight?.FlightNumber;
+                OutboundTailNumber = draft.OutboundFlight?.TailNumber;
+                ReturnFlightNumber = draft.ReturnFlight?.FlightNumber;
+                ReturnTailNumber = draft.ReturnFlight?.TailNumber;
+                HasAnyFlight = !string.IsNullOrWhiteSpace(OutboundFlightNumber) ||
+                               !string.IsNullOrWhiteSpace(OutboundTailNumber) ||
+                               !string.IsNullOrWhiteSpace(ReturnFlightNumber) ||
+                               !string.IsNullOrWhiteSpace(ReturnTailNumber);
+
+                // Extract pickup/dropoff info
+                PickupStyleLabel = FormatPickupStyle(draft.PickupStyle);
+                PickupSign = draft.PickupStyle == PickupStyle.MeetAndGreet ? (draft.PickupSignText ?? "").Trim() : "";
+                ReturnStyleLabel = draft.ReturnPickupStyle.HasValue ? FormatPickupStyle(draft.ReturnPickupStyle) : null;
+                ReturnSign = draft.ReturnPickupStyle == PickupStyle.MeetAndGreet ? (draft.ReturnPickupSignText ?? "").Trim() : null;
+                DropoffText = draft.AsDirected ? "As Directed" : (string.IsNullOrWhiteSpace(draft.DropoffLocation) ? "N/A" : draft.DropoffLocation);
+                ReturnWhen = draft.ReturnPickupTime?.ToString("G");
+                ReturnPickupLocation = draft.DropoffLocation ?? draft.PickupLocation;
+            }
+
+            // Helper methods
+            public string H(string? s) => WebUtility.HtmlEncode(s ?? "");
+            public string EmailLink(string s) => s == "N/A" ? s : $@"<a href=""mailto:{H(s)}"">{H(s)}</a>";
+
+            private static string FormatPickupStyle(PickupStyle? style) => style switch
+            {
+                PickupStyle.MeetAndGreet => "Meet & Greet",
+                PickupStyle.Curbside => "Curbside",
+                _ => "Curbside"
+            };
+
+            // ===================================================================
+            // SECTION BUILDERS - HTML
+            // ===================================================================
+
+            public string BuildContactSectionHtml()
+            {
+                var sb = new StringBuilder();
+                sb.Append($"<p><b>Booker:</b> {H(BookerName)} &mdash; {H(BookerPhone)} &mdash; {EmailLink(BookerEmail)}</p>");
+                sb.Append($"<p><b>Passenger:</b> {H(PassengerName)} &mdash; {H(PassengerPhone)} &mdash; {EmailLink(PassengerEmail)}</p>");
+                if (AdditionalPassengers.Count > 0)
+                    sb.Append($"<p><b>Additional Passengers:</b> {H(string.Join(", ", AdditionalPassengers))}</p>");
+                return sb.ToString();
+            }
+
+            public string BuildTripDetailsHtml()
+            {
+                var sb = new StringBuilder();
+                sb.Append($"<p><b>Pickup:</b> {Draft.PickupDateTime:G} — {H(Draft.PickupLocation)}</p>");
+                sb.Append($"<p><b>Pickup Style:</b> {H(PickupStyleLabel)}{(string.IsNullOrWhiteSpace(PickupSign) ? "" : $" — Sign: {H(PickupSign)}")}</p>");
+                sb.Append($"<p><b>Dropoff:</b> {H(DropoffText)}</p>");
+                sb.Append(BuildFlightDetailsHtml());
+                return sb.ToString();
+            }
+
+            public string BuildVehicleAndCapacityHtml()
+            {
+                var sb = new StringBuilder();
+                sb.Append($"<p><b>Vehicle:</b> {H(Draft.VehicleClass)}</p>");
+                sb.Append($"<p><b>Passengers/Luggage:</b> {Draft.PassengerCount} pax, {Draft.CheckedBags ?? 0} checked, {Draft.CarryOnBags ?? 0} carry-on</p>");
+                sb.Append(BuildCapacityWarningHtml());
+                return sb.ToString();
+            }
+
+            public string BuildServiceOptionsHtml()
+            {
+                var sb = new StringBuilder();
+                sb.Append($"<p><b>As Directed:</b> {Draft.AsDirected} {(Draft.AsDirected ? $"({Draft.Hours}h)" : "")}</p>");
+                sb.Append($"<p><b>Round Trip:</b> {Draft.RoundTrip} {(Draft.RoundTrip ? $"(Return {H(ReturnWhen)})" : "")}</p>");
+                return sb.ToString();
+            }
+
+            public string BuildReturnTripHtml()
+            {
+                if (!Draft.RoundTrip || Draft.ReturnPickupTime is null) return "";
+                return $@"
+            <p><b>Return Pickup:</b> {H(ReturnWhen)} — {H(ReturnPickupLocation)}</p>
+            <p><b>Return Pickup Style:</b> {H(ReturnStyleLabel!)}{(string.IsNullOrWhiteSpace(ReturnSign) ? "" : $" — Sign: {H(ReturnSign)}")}</p>
+            <p><b>Return Dropoff:</b> {H(Draft.PickupLocation)}</p>";
+            }
+
+            private string BuildFlightDetailsHtml()
+            {
+                if (!HasAnyFlight) return "";
+                var sb = new StringBuilder("<p><b>Flight Details:</b><br/>");
+                if (!string.IsNullOrWhiteSpace(OutboundFlightNumber)) sb.Append($"Outbound Flight #: {H(OutboundFlightNumber)}<br/>");
+                if (!string.IsNullOrWhiteSpace(OutboundTailNumber)) sb.Append($"Outbound Tail #: {H(OutboundTailNumber)}<br/>");
+                if (!string.IsNullOrWhiteSpace(ReturnFlightNumber)) sb.Append($"Return Flight #: {H(ReturnFlightNumber)}<br/>");
+                if (!string.IsNullOrWhiteSpace(ReturnTailNumber)) sb.Append($"Return Tail #: {H(ReturnTailNumber)}<br/>");
+                if (!string.IsNullOrWhiteSpace(OutboundTailNumber) && string.IsNullOrWhiteSpace(ReturnTailNumber) && Draft.RoundTrip)
+                    sb.Append("Return Aircraft: Same as outbound<br/>");
+                sb.Append("</p>");
+                return sb.ToString();
+            }
+
+            private string BuildCapacityWarningHtml()
+            {
+                if (Draft.CapacityWithinLimits) return "";
+                var keepText = Draft.CapacityOverrideByUser
+                    ? "Booker chose to keep the current vehicle despite capacity limits."
+                    : "Please advise an upgrade with the booker.";
+                var suggestion = string.IsNullOrWhiteSpace(Draft.SuggestedVehicle) ? "" : $" Suggested: {H(Draft.SuggestedVehicle)}.";
+                var note = string.IsNullOrWhiteSpace(Draft.CapacityNote) ? "" : $" {H(Draft.CapacityNote)}";
+                return $@"<p style=""color:#d97706""><b>Capacity Warning:</b>{note}{suggestion} {H(keepText)}</p>";
+            }
+
+            public string BuildAdditionalRequestOtherHtml()
+            {
+                return string.IsNullOrWhiteSpace(Draft.AdditionalRequestOtherText) ? "" : $"— {H(Draft.AdditionalRequestOtherText)}";
+            }
+
+            // ===================================================================
+            // SECTION BUILDERS - TEXT
+            // ===================================================================
+
+            public string BuildContactSectionText()
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine($"Booker: {BookerName} - {BookerPhone} - {BookerEmail}");
+                sb.AppendLine($"Passenger: {PassengerName} - {PassengerPhone} - {PassengerEmail}");
+                if (AdditionalPassengers.Count > 0)
+                    sb.AppendLine($"Additional Passengers: {string.Join(", ", AdditionalPassengers)}");
+                return sb.ToString();
+            }
+
+            public string BuildTripDetailsText()
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine($"Pickup: {Draft.PickupDateTime:G} — {Draft.PickupLocation}");
+                sb.AppendLine($"Pickup Style: {PickupStyleLabel}{(string.IsNullOrWhiteSpace(PickupSign) ? "" : $" — Sign: {PickupSign}")}");
+                sb.AppendLine($"Dropoff: {DropoffText}");
+                sb.Append(BuildFlightDetailsText());
+                return sb.ToString();
+            }
+
+            public string BuildVehicleAndCapacityText()
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine($"Vehicle: {Draft.VehicleClass}");
+                sb.AppendLine($"Passengers/Luggage: {Draft.PassengerCount} pax, {Draft.CheckedBags ?? 0} checked, {Draft.CarryOnBags ?? 0} carry-on");
+                return sb.ToString();
+            }
+
+            public string BuildServiceOptionsText()
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine($"As Directed: {Draft.AsDirected}{(Draft.AsDirected ? $" ({Draft.Hours}h)" : "")}");
+                sb.AppendLine($"Round Trip: {Draft.RoundTrip}{(Draft.RoundTrip ? $" (Return {ReturnWhen})" : "")}");
+                return sb.ToString();
+            }
+
+            public string BuildReturnTripText()
+            {
+                if (!Draft.RoundTrip || Draft.ReturnPickupTime is null) return "";
+                var sb = new StringBuilder();
+                sb.AppendLine($"Return Pickup: {ReturnWhen} — {ReturnPickupLocation}");
+                sb.AppendLine($"Return Pickup Style: {ReturnStyleLabel}{(string.IsNullOrWhiteSpace(ReturnSign) ? "" : $" — Sign: {ReturnSign}")}");
+                sb.AppendLine($"Return Dropoff: {Draft.PickupLocation}");
+                return sb.ToString();
+            }
+
+            private string BuildFlightDetailsText()
+            {
+                if (!HasAnyFlight) return "";
+                var lines = new List<string> { "Flight Details:" };
+                if (!string.IsNullOrWhiteSpace(OutboundFlightNumber)) lines.Add($"  Outbound Flight #: {OutboundFlightNumber}");
+                if (!string.IsNullOrWhiteSpace(OutboundTailNumber)) lines.Add($"  Outbound Tail #: {OutboundTailNumber}");
+                if (!string.IsNullOrWhiteSpace(ReturnFlightNumber)) lines.Add($"  Return Flight #: {ReturnFlightNumber}");
+                if (!string.IsNullOrWhiteSpace(ReturnTailNumber)) lines.Add($"  Return Tail #: {ReturnTailNumber}");
+                if (!string.IsNullOrWhiteSpace(OutboundTailNumber) && string.IsNullOrWhiteSpace(ReturnTailNumber) && Draft.RoundTrip)
+                    lines.Add("  Return Aircraft: Same as outbound");
+                return string.Join("\n", lines) + "\n";
+            }
+
+            public string BuildAdditionalRequestOtherText()
+            {
+                return string.IsNullOrWhiteSpace(Draft.AdditionalRequestOtherText) ? "" : $" — {Draft.AdditionalRequestOtherText}";
+            }
         }
     }
 }
