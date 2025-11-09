@@ -89,6 +89,7 @@ namespace Bellwood.AdminApi.Services
             {ctx.BuildVehicleAndCapacityText()}
             {ctx.BuildServiceOptionsText()}
             {ctx.BuildReturnTripText()}
+            {ctx.BuildPaymentMethodHtml()}
             Additional Request: {ctx.Draft.AdditionalRequest}{ctx.BuildAdditionalRequestOtherText()}
 
             JSON:
@@ -110,6 +111,8 @@ namespace Bellwood.AdminApi.Services
                 {ctx.BuildVehicleAndCapacityHtml()}
                 {ctx.BuildServiceOptionsHtml()}
                 {ctx.BuildReturnTripHtml()}
+                {ctx.BuildPaymentMethodText()}
+
                 <p><b>Additional Request:</b> {ctx.H(ctx.Draft.AdditionalRequest)} {ctx.BuildAdditionalRequestOtherHtml()}</p>
                 <hr/>
                 <pre>{WebUtility.HtmlEncode(ctx.Json)}</pre>";
@@ -184,6 +187,11 @@ namespace Bellwood.AdminApi.Services
             public string? ReturnWhen { get; }
             public string ReturnPickupLocation { get; }
 
+            // Payment info
+            public string? PaymentMethodId { get; }
+            public string? PaymentMethodLast4 { get; }
+            public bool HasPaymentMethod { get; }
+
             public EmailContext(QuoteDraft draft, string referenceId)
             {
                 Draft = draft;
@@ -219,6 +227,11 @@ namespace Bellwood.AdminApi.Services
                 DropoffText = draft.AsDirected ? "As Directed" : (string.IsNullOrWhiteSpace(draft.DropoffLocation) ? "N/A" : draft.DropoffLocation);
                 ReturnWhen = draft.ReturnPickupTime?.ToString("G");
                 ReturnPickupLocation = draft.DropoffLocation ?? draft.PickupLocation;
+
+                // Extract payment info
+                PaymentMethodId = draft.PaymentMethodId;
+                PaymentMethodLast4 = draft.PaymentMethodLast4;
+                HasPaymentMethod = !string.IsNullOrWhiteSpace(PaymentMethodId);
             }
 
             // Helper methods
@@ -310,6 +323,37 @@ namespace Bellwood.AdminApi.Services
             public string BuildAdditionalRequestOtherHtml()
             {
                 return string.IsNullOrWhiteSpace(Draft.AdditionalRequestOtherText) ? "" : $"— {H(Draft.AdditionalRequestOtherText)}";
+            }
+
+            public string BuildPaymentMethodHtml()
+            {
+                if (!HasPaymentMethod)
+                {
+                    return @"<p style=""color:#f56565; background:#fff5f5; padding:8px; border-left:3px solid #f56565;"">
+                    <b>⚠️ Payment Method:</b> Not provided — requires manual setup
+                 </p>";
+                }
+
+                var displayText = string.IsNullOrWhiteSpace(PaymentMethodLast4)
+                    ? $"Payment ID: {H(PaymentMethodId!)}"  // Fallback to ID if last4 missing
+                    : $"Last 4: ••{H(PaymentMethodLast4)}";
+
+                return $@"<p><b>💳 Selected Payment Method:</b> 
+                 <code style=""background:#2d3748; color:#d4af37; padding:2px 6px; border-radius:4px; font-family:monospace;"">{displayText}</code>
+                 <br/><small style=""color:#718096;"">Card to be used for invoice</small>
+              </p>";
+            }
+
+            public string BuildPaymentMethodText()
+            {
+                if (!HasPaymentMethod)
+                    return "Payment Method: ⚠️ Not provided (requires manual setup)\n";
+
+                var displayText = string.IsNullOrWhiteSpace(PaymentMethodLast4)
+                    ? $"{PaymentMethodId}"  // Fallback to ID
+                    : $"••{PaymentMethodLast4}";
+
+                return $"Last 4 of selected payment method: {displayText}\n  → Card to be used for invoice\n";
             }
 
             // ===================================================================
