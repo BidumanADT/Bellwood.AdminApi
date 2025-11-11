@@ -7,5 +7,6 @@ namespace Bellwood.AdminApi.Services
     {
         Task SendQuoteAsync(QuoteDraft draft, string referenceId);
         Task SendBookingAsync(QuoteDraft draft, string referenceId);
+        Task SendBookingCancellationAsync(QuoteDraft draft, string referenceId, string bookerName);
     }
 }

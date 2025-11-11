@@ -61,6 +61,24 @@ namespace Bellwood.AdminApi.Services
             await SendEmailAsync(msg);
         }
 
+        public async Task SendBookingCancellationAsync(QuoteDraft draft, string referenceId, string bookerName)
+        {
+            var msg = new MimeMessage();
+            msg.From.Add(MailboxAddress.Parse(_opt.From));
+            msg.To.Add(MailboxAddress.Parse(_opt.To));
+            msg.Subject = $"Bellwood Elite - BOOKING CANCELLED - {draft.PickupDateTime:MMM dd, yyyy @ h:mm tt} - {draft.Passenger}";
+
+            var context = new EmailContext(draft, referenceId);
+            var builder = new BodyBuilder
+            {
+                HtmlBody = BuildCancellationHtmlBody(context, bookerName),
+                TextBody = BuildCancellationTextBody(context, bookerName)
+            };
+
+            msg.Body = builder.ToMessageBody();
+            await SendEmailAsync(msg);
+        }
+
         // ===================================================================
         // EMAIL BODY BUILDERS - QUOTE
         // ===================================================================
@@ -89,7 +107,7 @@ namespace Bellwood.AdminApi.Services
             {ctx.BuildVehicleAndCapacityText()}
             {ctx.BuildServiceOptionsText()}
             {ctx.BuildReturnTripText()}
-            {ctx.BuildPaymentMethodHtml()}
+            {ctx.BuildPaymentMethodText()}
             Additional Request: {ctx.Draft.AdditionalRequest}{ctx.BuildAdditionalRequestOtherText()}
 
             JSON:
@@ -111,8 +129,7 @@ namespace Bellwood.AdminApi.Services
                 {ctx.BuildVehicleAndCapacityHtml()}
                 {ctx.BuildServiceOptionsHtml()}
                 {ctx.BuildReturnTripHtml()}
-                {ctx.BuildPaymentMethodText()}
-
+                {ctx.BuildPaymentMethodHtml()}
                 <p><b>Additional Request:</b> {ctx.H(ctx.Draft.AdditionalRequest)} {ctx.BuildAdditionalRequestOtherHtml()}</p>
                 <hr/>
                 <pre>{WebUtility.HtmlEncode(ctx.Json)}</pre>";
@@ -129,6 +146,57 @@ namespace Bellwood.AdminApi.Services
                 {ctx.BuildVehicleAndCapacityText()}
                 {ctx.BuildServiceOptionsText()}
                 {ctx.BuildReturnTripText()}
+                {ctx.BuildPaymentMethodText()}
+                Additional Request: {ctx.Draft.AdditionalRequest}{ctx.BuildAdditionalRequestOtherText()}
+
+                JSON:
+                {ctx.Json}";
+        }
+
+        // ===================================================================
+        // EMAIL BODY BUILDERS - CANCELLATION
+        // ===================================================================
+
+        private static string BuildCancellationHtmlBody(EmailContext ctx, string bookerName)
+        {
+            return $@"
+                <h3 style=""color:#e53e3e"">Bellwood Elite — BOOKING CANCELLATION</h3>
+                <p style=""background:#FED7D7; padding:8px; border-left:4px solid #e53e3e;""><b>🚫 CANCELLED:</b> Customer has cancelled this booking request.</p>
+                <p><b>Reference:</b> {ctx.H(ctx.ReferenceId)}</p>
+                <p><b>Cancelled By:</b> {ctx.H(bookerName)}</p>
+                <p><b>Cancelled At:</b> {DateTime.UtcNow:G} UTC</p>
+                
+                <hr/>
+                <h4>Original Booking Details:</h4>
+                {ctx.BuildContactSectionHtml()}
+                {ctx.BuildTripDetailsHtml()}
+                {ctx.BuildVehicleAndCapacityHtml()}
+                {ctx.BuildServiceOptionsHtml()}
+                {ctx.BuildReturnTripHtml()}
+                {ctx.BuildPaymentMethodHtml()}
+                <p><b>Additional Request:</b> {ctx.H(ctx.Draft.AdditionalRequest)} {ctx.BuildAdditionalRequestOtherHtml()}</p>
+                <hr/>
+                <pre>{WebUtility.HtmlEncode(ctx.Json)}</pre>";
+        }
+
+        private static string BuildCancellationTextBody(EmailContext ctx, string bookerName)
+        {
+            return $@"Bellwood Elite — BOOKING CANCELLATION
+                🚫 CANCELLED: Customer has cancelled this booking request.
+
+                Reference: {ctx.ReferenceId}
+                Cancelled By: {bookerName}
+                Cancelled At: {DateTime.UtcNow:G} UTC
+
+                ========================================
+                Original Booking Details:
+                ========================================
+                {ctx.BuildContactSectionText()}
+                {ctx.BuildTripDetailsText()}
+                {ctx.BuildVehicleAndCapacityText()}
+                {ctx.BuildServiceOptionsText()}
+                {ctx.BuildReturnTripText()}
+                {ctx.BuildPaymentMethodText()}
                 Additional Request: {ctx.Draft.AdditionalRequest}{ctx.BuildAdditionalRequestOtherText()}
 
                 JSON:
@@ -335,7 +403,7 @@ namespace Bellwood.AdminApi.Services
                 }
 
                 var displayText = string.IsNullOrWhiteSpace(PaymentMethodLast4)
-                    ? $"Payment ID: {H(PaymentMethodId!)}"  // Fallback to ID if last4 missing
+                    ? $"Payment ID: {H(PaymentMethodId!)}"
                     : $"Last 4: ••{H(PaymentMethodLast4)}";
 
                 return $@"<p><b>💳 Selected Payment Method:</b> 
@@ -350,7 +418,7 @@ namespace Bellwood.AdminApi.Services
                     return "Payment Method: ⚠️ Not provided (requires manual setup)\n";
 
                 var displayText = string.IsNullOrWhiteSpace(PaymentMethodLast4)
-                    ? $"{PaymentMethodId}"  // Fallback to ID
+                    ? $"{PaymentMethodId}"
                     : $"••{PaymentMethodLast4}";
 
                 return $"Last 4 of selected payment method: {displayText}\n  → Card to be used for invoice\n";
