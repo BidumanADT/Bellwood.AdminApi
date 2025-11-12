@@ -23,6 +23,7 @@ public sealed class BookingRecord
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public BookingStatus Status { get; set; } = BookingStatus.Requested;
+    public DateTime? CancelledAt { get; set; }
 
     // Flattened fields for list views
     public string BookerName { get; set; } = "";

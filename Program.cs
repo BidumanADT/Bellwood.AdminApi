@@ -447,6 +447,55 @@ app.MapGet("/bookings/{id}", async (string id, HttpRequest req, IBookingReposito
 .WithName("GetBooking");
 
 // ===================================================================
+// CANCEL ENDPOINTS
+// ===================================================================
+
+// POST /bookings/{id}/cancel - Cancel a booking request
+app.MapPost("/bookings/{id}/cancel", async (
+    string id,
+    HttpRequest req,
+    IBookingRepository repo,
+    IEmailSender email,
+    ILoggerFactory loggerFactory) =>
+{
+    var auth = UnauthorizedIfKeyMissing(req, apiKey);
+    if (auth is IStatusCodeHttpResult sc && sc.StatusCode == 401) return auth;
+
+    var log = loggerFactory.CreateLogger("bookings");
+
+    // Find booking
+    var booking = await repo.GetAsync(id);
+    if (booking is null)
+        return Results.NotFound(new { error = "Booking not found" });
+
+    // Only allow cancellation if status is Requested or Confirmed
+    if (booking.Status != BookingStatus.Requested && booking.Status != BookingStatus.Confirmed)
+    {
+        return Results.BadRequest(new { error = $"Cannot cancel booking with status: {booking.Status}" });
+    }
+
+    // Update status
+    booking.Status = BookingStatus.Cancelled;
+    booking.CancelledAt = DateTime.UtcNow;
+    await repo.UpdateStatusAsync(id, BookingStatus.Cancelled);
+
+    // Send cancellation email
+    try
+    {
+        await email.SendBookingCancellationAsync(booking.Draft, id, booking.BookerName);
+        log.LogInformation("Booking {Id} cancelled by {Booker}", id, booking.BookerName);
+    }
+    catch (Exception ex)
+    {
+        log.LogError(ex, "Cancellation email send failed for booking {Id}", id);
+        // Continue anyway - cancellation is recorded
+    }
+
+    return Results.Ok(new { message = "Booking cancelled successfully", id, status = "Cancelled" });
+})
+.WithName("CancelBooking");
+
+// ===================================================================
 // APPLICATION START
 // ===================================================================
 
