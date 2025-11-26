@@ -1,7 +1,11 @@
+using System.Text;
 using System.Text.Json.Serialization;
 using Bellwood.AdminApi.Models;
 using Bellwood.AdminApi.Services;
 using BellwoodGlobal.Mobile.Models;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -21,6 +25,32 @@ builder.Services.AddSingleton<IBookingRepository, FileBookingRepository>();
 // API documentation
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// Configure JWT auth using the same key as AuthServer:
+var jwtKey = builder.Configuration["Jwt:Key"]
+             ?? "super-long-jwt-signing-secret-1234"; // fallback
+var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
+
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer = false,
+        ValidateAudience = false,
+        ValidateIssuerSigningKey = true,
+        IssuerSigningKey = signingKey,
+        ValidateLifetime = true,
+        ClockSkew = TimeSpan.Zero
+    };
+});
+
+// Register authorization:
+builder.Services.AddAuthorization();
 
 // CORS for development
 builder.Services.AddCors(p => p.AddDefaultPolicy(policy =>
@@ -45,6 +75,9 @@ var app = builder.Build();
 
 app.UseCors();
 
+app.UseAuthentication();
+app.UseAuthorization();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -57,16 +90,6 @@ if (app.Environment.IsDevelopment())
 
 // Health check endpoint
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
-
-// API key validation helper
-string? apiKey = builder.Configuration["Email:ApiKey"];
-static IResult UnauthorizedIfKeyMissing(HttpRequest req, string? configuredKey)
-{
-    if (string.IsNullOrWhiteSpace(configuredKey)) return Results.Ok();
-    if (!req.Headers.TryGetValue("X-Admin-ApiKey", out var provided) || provided != configuredKey)
-        return Results.Unauthorized();
-    return Results.Ok();
-}
 
 // ===================================================================
 // QUOTE ENDPOINTS
@@ -190,19 +213,16 @@ app.MapPost("/quotes/seed", async (IQuoteRepository repo) =>
 
     return Results.Ok(new { added = samples.Length });
 })
-.WithName("SeedQuotes");
+.WithName("SeedQuotes")
+.RequireAuthorization();
 
 // POST /quotes - Submit a new quote request
 app.MapPost("/quotes", async (
     [FromBody] QuoteDraft draft,
-    HttpRequest req,
     IEmailSender email,
     IQuoteRepository repo,
     ILoggerFactory loggerFactory) =>
 {
-    var auth = UnauthorizedIfKeyMissing(req, apiKey);
-    if (auth is IStatusCodeHttpResult sc && sc.StatusCode == 401) return auth;
-
     var log = loggerFactory.CreateLogger("quotes");
 
     if (draft is null || string.IsNullOrWhiteSpace(draft.PickupLocation))
@@ -234,14 +254,12 @@ app.MapPost("/quotes", async (
 
     return Results.Accepted($"/quotes/{rec.Id}", new { id = rec.Id });
 })
-.WithName("SubmitQuote");
+.WithName("SubmitQuote")
+.RequireAuthorization();
 
 // GET /quotes/list - List recent quotes (paginated)
-app.MapGet("/quotes/list", async ([FromQuery] int take, HttpRequest req, IQuoteRepository repo) =>
+app.MapGet("/quotes/list", async ([FromQuery] int take, IQuoteRepository repo) =>
 {
-    var auth = UnauthorizedIfKeyMissing(req, apiKey);
-    if (auth is IStatusCodeHttpResult sc && sc.StatusCode == 401) return auth;
-
     take = (take <= 0 || take > 200) ? 50 : take;
     var rows = await repo.ListAsync(take);
 
@@ -259,18 +277,17 @@ app.MapGet("/quotes/list", async ([FromQuery] int take, HttpRequest req, IQuoteR
 
     return Results.Ok(list);
 })
-.WithName("ListQuotes");
+.WithName("ListQuotes")
+.RequireAuthorization();
 
 // GET /quotes/{id} - Get detailed quote by ID
-app.MapGet("/quotes/{id}", async (string id, HttpRequest req, IQuoteRepository repo) =>
+app.MapGet("/quotes/{id}", async (string id, IQuoteRepository repo) =>
 {
-    var auth = UnauthorizedIfKeyMissing(req, apiKey);
-    if (auth is IStatusCodeHttpResult sc && sc.StatusCode == 401) return auth;
-
     var rec = await repo.GetAsync(id);
     return rec is null ? Results.NotFound() : Results.Ok(rec);
 })
-.WithName("GetQuote");
+.WithName("GetQuote")
+.RequireAuthorization();
 
 // ===================================================================
 // BOOKING ENDPOINTS
@@ -350,19 +367,16 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
 
     return Results.Ok(new { added = samples.Length });
 })
-.WithName("SeedBookings");
+.WithName("SeedBookings")
+.RequireAuthorization();
 
 // POST /bookings - Submit a new booking request
 app.MapPost("/bookings", async (
     [FromBody] QuoteDraft draft,
-    HttpRequest req,
     IEmailSender email,
     IBookingRepository repo,
     ILoggerFactory loggerFactory) =>
 {
-    var auth = UnauthorizedIfKeyMissing(req, apiKey);
-    if (auth is IStatusCodeHttpResult sc && sc.StatusCode == 401) return auth;
-
     var log = loggerFactory.CreateLogger("bookings");
 
     if (draft is null || string.IsNullOrWhiteSpace(draft.PickupLocation))
@@ -394,14 +408,12 @@ app.MapPost("/bookings", async (
 
     return Results.Accepted($"/bookings/{rec.Id}", new { id = rec.Id });
 })
-.WithName("SubmitBooking");
+.WithName("SubmitBooking")
+.RequireAuthorization();
 
 // GET /bookings/list - List recent bookings (paginated)
-app.MapGet("/bookings/list", async ([FromQuery] int take, HttpRequest req, IBookingRepository repo) =>
+app.MapGet("/bookings/list", async ([FromQuery] int take, IBookingRepository repo) =>
 {
-    var auth = UnauthorizedIfKeyMissing(req, apiKey);
-    if (auth is IStatusCodeHttpResult sc && sc.StatusCode == 401) return auth;
-
     take = (take <= 0 || take > 200) ? 50 : take;
     var rows = await repo.ListAsync(take);
 
@@ -419,14 +431,12 @@ app.MapGet("/bookings/list", async ([FromQuery] int take, HttpRequest req, IBook
 
     return Results.Ok(list);
 })
-.WithName("ListBookings");
+.WithName("ListBookings")
+.RequireAuthorization();
 
 // GET /bookings/{id} - Get detailed booking by ID
-app.MapGet("/bookings/{id}", async (string id, HttpRequest req, IBookingRepository repo) =>
+app.MapGet("/bookings/{id}", async (string id, IBookingRepository repo) =>
 {
-    var auth = UnauthorizedIfKeyMissing(req, apiKey);
-    if (auth is IStatusCodeHttpResult sc && sc.StatusCode == 401) return auth;
-
     var rec = await repo.GetAsync(id);
     if (rec is null) return Results.NotFound();
 
@@ -444,7 +454,8 @@ app.MapGet("/bookings/{id}", async (string id, HttpRequest req, IBookingReposito
         rec.Draft
     });
 })
-.WithName("GetBooking");
+.WithName("GetBooking")
+.RequireAuthorization();
 
 // ===================================================================
 // CANCEL ENDPOINTS
@@ -453,14 +464,10 @@ app.MapGet("/bookings/{id}", async (string id, HttpRequest req, IBookingReposito
 // POST /bookings/{id}/cancel - Cancel a booking request
 app.MapPost("/bookings/{id}/cancel", async (
     string id,
-    HttpRequest req,
     IBookingRepository repo,
     IEmailSender email,
     ILoggerFactory loggerFactory) =>
 {
-    var auth = UnauthorizedIfKeyMissing(req, apiKey);
-    if (auth is IStatusCodeHttpResult sc && sc.StatusCode == 401) return auth;
-
     var log = loggerFactory.CreateLogger("bookings");
 
     // Find booking
@@ -493,7 +500,8 @@ app.MapPost("/bookings/{id}/cancel", async (
 
     return Results.Ok(new { message = "Booking cancelled successfully", id, status = "Cancelled" });
 })
-.WithName("CancelBooking");
+.WithName("CancelBooking")
+.RequireAuthorization();
 
 // ===================================================================
 // APPLICATION START

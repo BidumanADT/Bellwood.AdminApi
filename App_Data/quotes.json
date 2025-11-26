@@ -1,5 +1,59 @@
 [
   {
+    "Id": "6df5ce967cb54539bc666adb6f1f6725",
+    "CreatedUtc": "2025-11-26T15:53:19.8568422Z",
+    "Status": "Submitted",
+    "BookerName": "Alice Morgan",
+    "PassengerName": "JwtAuth TestQuote",
+    "VehicleClass": "S-Class",
+    "PickupLocation": "Home - 123 Wacker Dr, Chicago, IL",
+    "DropoffLocation": "Langham - 330 N Wabash Ave, Chicago, IL",
+    "PickupDateTime": "2025-11-26T11:22:34.2919443-05:00",
+    "Draft": {
+      "Booker": {
+        "FirstName": "Alice",
+        "LastName": "Morgan",
+        "PhoneNumber": "312-555-7777",
+        "EmailAddress": "alice.morgan@example.com"
+      },
+      "Passenger": {
+        "FirstName": "JwtAuth",
+        "LastName": "TestQuote",
+        "PhoneNumber": "",
+        "EmailAddress": ""
+      },
+      "AdditionalPassengers": [],
+      "VehicleClass": "S-Class",
+      "PickupDateTime": "2025-11-26T11:22:34.2919443-05:00",
+      "PickupLocation": "Home - 123 Wacker Dr, Chicago, IL",
+      "PickupStyle": "Curbside",
+      "PickupSignText": null,
+      "ReturnPickupStyle": null,
+      "ReturnPickupSignText": null,
+      "AsDirected": false,
+      "Hours": null,
+      "DropoffLocation": "Langham - 330 N Wabash Ave, Chicago, IL",
+      "RoundTrip": false,
+      "ReturnPickupTime": null,
+      "OutboundFlight": {
+        "FlightNumber": null,
+        "TailNumber": null
+      },
+      "ReturnFlight": null,
+      "PassengerCount": 1,
+      "CheckedBags": 0,
+      "CarryOnBags": 0,
+      "CapacityWithinLimits": true,
+      "CapacityNote": null,
+      "SuggestedVehicle": null,
+      "CapacityOverrideByUser": false,
+      "AdditionalRequest": null,
+      "AdditionalRequestOtherText": null,
+      "PaymentMethodId": null,
+      "PaymentMethodLast4": null
+    }
+  },
+  {
     "Id": "8cb075aebc8c4797b974998dfafce74f",
     "CreatedUtc": "2025-11-03T22:29:27.8327126Z",
     "Status": "Submitted",
@@ -8,7 +62,7 @@
     "VehicleClass": "Sedan",
     "PickupLocation": "Signature FBO (ORD) - 825 Patton Drive, Chicago, IL 60666",
     "DropoffLocation": "Home - 123 Wacker Dr, Chicago, IL",
-    "PickupDateTime": "2025-11-03T16:56:44.3745365-06:00",
+    "PickupDateTime": "2025-11-03T17:56:44.3745365-05:00",
     "Draft": {
       "Booker": {
         "FirstName": "Alice",
@@ -27,7 +81,7 @@
         "AddPax Two"
       ],
       "VehicleClass": "Sedan",
-      "PickupDateTime": "2025-11-03T16:56:44.3745365-06:00",
+      "PickupDateTime": "2025-11-03T17:56:44.3745365-05:00",
       "PickupLocation": "Signature FBO (ORD) - 825 Patton Drive, Chicago, IL 60666",
       "PickupStyle": "MeetAndGreet",
       "PickupSignText": "Sign - Test",
@@ -54,7 +108,9 @@
       "SuggestedVehicle": "SUV",
       "CapacityOverrideByUser": true,
       "AdditionalRequest": "Other",
-      "AdditionalRequestOtherText": "Water Bottle"
+      "AdditionalRequestOtherText": "Water Bottle",
+      "PaymentMethodId": null,
+      "PaymentMethodLast4": null
     }
   },
   {
@@ -106,7 +162,9 @@
       "SuggestedVehicle": null,
       "CapacityOverrideByUser": false,
       "AdditionalRequest": null,
-      "AdditionalRequestOtherText": null
+      "AdditionalRequestOtherText": null,
+      "PaymentMethodId": null,
+      "PaymentMethodLast4": null
     }
   },
   {
@@ -158,7 +216,9 @@
       "SuggestedVehicle": null,
       "CapacityOverrideByUser": false,
       "AdditionalRequest": null,
-      "AdditionalRequestOtherText": null
+      "AdditionalRequestOtherText": null,
+      "PaymentMethodId": null,
+      "PaymentMethodLast4": null
     }
   },
   {
@@ -210,7 +270,9 @@
       "SuggestedVehicle": null,
       "CapacityOverrideByUser": false,
       "AdditionalRequest": null,
-      "AdditionalRequestOtherText": null
+      "AdditionalRequestOtherText": null,
+      "PaymentMethodId": null,
+      "PaymentMethodLast4": null
     }
   },
   {
@@ -262,7 +324,9 @@
       "SuggestedVehicle": null,
       "CapacityOverrideByUser": false,
       "AdditionalRequest": null,
-      "AdditionalRequestOtherText": null
+      "AdditionalRequestOtherText": null,
+      "PaymentMethodId": null,
+      "PaymentMethodLast4": null
     }
   },
   {
@@ -314,7 +378,9 @@
       "SuggestedVehicle": null,
       "CapacityOverrideByUser": false,
       "AdditionalRequest": null,
-      "AdditionalRequestOtherText": null
+      "AdditionalRequestOtherText": null,
+      "PaymentMethodId": null,
+      "PaymentMethodLast4": null
     }
   }
 ]
