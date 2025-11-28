@@ -15,6 +15,19 @@ public enum BookingStatus
 }
 
 /// <summary>
+/// Driver-facing ride status (granular driver actions).
+/// </summary>
+public enum RideStatus
+{
+    Scheduled = 0,       // Booking assigned but driver hasn't moved yet
+    OnRoute = 1,         // Driver heading to pickup
+    Arrived = 2,         // Driver at pickup location
+    PassengerOnboard = 3,// Passenger picked up, ride in progress
+    Completed = 4,       // Ride finished successfully
+    Cancelled = 5        // Ride cancelled
+}
+
+/// <summary>
 /// Server-side booking record with flattened fields for list views + full draft.
 /// Mirrors QuoteRecord structure.
 /// </summary>
@@ -24,6 +37,10 @@ public sealed class BookingRecord
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public BookingStatus Status { get; set; } = BookingStatus.Requested;
     public DateTime? CancelledAt { get; set; }
+
+    // Driver assignment
+    public string? AssignedDriverUid { get; set; }
+    public RideStatus? CurrentRideStatus { get; set; }
 
     // Flattened fields for list views
     public string BookerName { get; set; } = "";

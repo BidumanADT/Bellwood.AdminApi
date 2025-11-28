@@ -22,6 +22,9 @@ builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
 builder.Services.AddSingleton<IQuoteRepository, FileQuoteRepository>();
 builder.Services.AddSingleton<IBookingRepository, FileBookingRepository>();
 
+// Location tracking service (in-memory)
+builder.Services.AddSingleton<ILocationService, InMemoryLocationService>();
+
 // API documentation
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -49,8 +52,12 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-// Register authorization:
-builder.Services.AddAuthorization();
+// Register authorization with driver policy:
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("DriverOnly", policy =>
+        policy.RequireClaim("role", "driver"));
+});
 
 // CORS for development
 builder.Services.AddCors(p => p.AddDefaultPolicy(policy =>
@@ -302,7 +309,9 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
     {
         new BookingRecord {
             CreatedUtc = now.AddMinutes(-5),
-            Status = BookingStatus.Requested,
+            Status = BookingStatus.Scheduled,
+            AssignedDriverUid = "driver-001", // Test driver UID
+            CurrentRideStatus = RideStatus.Scheduled,
             BookerName = "Alice Morgan",
             PassengerName = "Taylor Reed",
             VehicleClass = "SUV",
@@ -323,18 +332,20 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
         },
         new BookingRecord {
             CreatedUtc = now.AddHours(-2),
-            Status = BookingStatus.Confirmed,
+            Status = BookingStatus.Scheduled,
+            AssignedDriverUid = "driver-001", // Same driver
+            CurrentRideStatus = RideStatus.Scheduled,
             BookerName = "Chris Bailey",
             PassengerName = "Jordan Chen",
             VehicleClass = "Sedan",
             PickupLocation = "Langham Hotel",
             DropoffLocation = "Midway Airport",
-            PickupDateTime = now.AddDays(1),
+            PickupDateTime = now.AddHours(5),
             Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
                 Booker = new() { FirstName="Chris", LastName="Bailey" },
                 Passenger = new() { FirstName="Jordan", LastName="Chen" },
                 VehicleClass = "Sedan",
-                PickupDateTime = now.AddDays(1),
+                PickupDateTime = now.AddHours(5),
                 PickupLocation = "Langham Hotel",
                 PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "Midway Airport",
@@ -344,6 +355,8 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
         new BookingRecord {
             CreatedUtc = now.AddDays(-1),
             Status = BookingStatus.Completed,
+            AssignedDriverUid = "driver-002", // Different driver
+            CurrentRideStatus = RideStatus.Completed,
             BookerName = "Lisa Gomez",
             PassengerName = "Derek James",
             VehicleClass = "S-Class",
@@ -502,6 +515,225 @@ app.MapPost("/bookings/{id}/cancel", async (
 })
 .WithName("CancelBooking")
 .RequireAuthorization();
+
+// ===================================================================
+// DRIVER ENDPOINTS
+// ===================================================================
+
+// Helper: Extract driver UID from claims
+static string? GetDriverUid(HttpContext context) =>
+    context.User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value;
+
+// GET /driver/rides/today - Get driver's rides for the next 24 hours
+app.MapGet("/driver/rides/today", async (HttpContext context, IBookingRepository repo) =>
+{
+    var driverUid = GetDriverUid(context);
+    if (string.IsNullOrEmpty(driverUid))
+        return Results.Unauthorized();
+
+    var now = DateTime.UtcNow;
+    var tomorrow = now.AddHours(24);
+
+    var allBookings = await repo.ListAsync(200); // Get enough to filter
+    var driverRides = allBookings
+        .Where(b => b.AssignedDriverUid == driverUid
+                    && b.PickupDateTime >= now
+                    && b.PickupDateTime <= tomorrow
+                    && b.CurrentRideStatus != RideStatus.Completed
+                    && b.CurrentRideStatus != RideStatus.Cancelled)
+        .OrderBy(b => b.PickupDateTime)
+        .Select(b => new DriverRideListItemDto
+        {
+            Id = b.Id,
+            PickupDateTime = b.PickupDateTime,
+            PickupLocation = b.PickupLocation,
+            DropoffLocation = b.DropoffLocation,
+            PassengerName = b.PassengerName,
+            PassengerPhone = b.Draft.Passenger?.PhoneNumber ?? "N/A",
+            Status = b.CurrentRideStatus ?? RideStatus.Scheduled
+        })
+        .ToList();
+
+    return Results.Ok(driverRides);
+})
+.WithName("GetDriverRidesToday")
+.RequireAuthorization("DriverOnly");
+
+// GET /driver/rides/{id} - Get detailed ride info (ownership validated)
+app.MapGet("/driver/rides/{id}", async (string id, HttpContext context, IBookingRepository repo) =>
+{
+    var driverUid = GetDriverUid(context);
+    if (string.IsNullOrEmpty(driverUid))
+        return Results.Unauthorized();
+
+    var booking = await repo.GetAsync(id);
+    if (booking is null)
+        return Results.NotFound(new { error = "Ride not found" });
+
+    // Verify driver owns this ride
+    if (booking.AssignedDriverUid != driverUid)
+        return Results.Forbid();
+
+    var detail = new DriverRideDetailDto
+    {
+        Id = booking.Id,
+        PickupDateTime = booking.PickupDateTime,
+        PickupLocation = booking.PickupLocation,
+        PickupStyle = booking.Draft.PickupStyle.ToString(),
+        PickupSignText = booking.Draft.PickupSignText,
+        DropoffLocation = booking.DropoffLocation,
+        PassengerName = booking.PassengerName,
+        PassengerPhone = booking.Draft.Passenger?.PhoneNumber ?? "N/A",
+        PassengerCount = booking.Draft.PassengerCount,
+        CheckedBags = booking.Draft.CheckedBags ?? 0,
+        CarryOnBags = booking.Draft.CarryOnBags ?? 0,
+        VehicleClass = booking.VehicleClass,
+        OutboundFlight = booking.Draft.OutboundFlight,
+        AdditionalRequest = booking.Draft.AdditionalRequest,
+        Status = booking.CurrentRideStatus ?? RideStatus.Scheduled
+    };
+
+    return Results.Ok(detail);
+})
+.WithName("GetDriverRideDetail")
+.RequireAuthorization("DriverOnly");
+
+// POST /driver/rides/{id}/status - Update ride status with FSM validation
+app.MapPost("/driver/rides/{id}/status", async (
+    string id,
+    [FromBody] RideStatusUpdateRequest request,
+    HttpContext context,
+    IBookingRepository repo,
+    ILoggerFactory loggerFactory) =>
+{
+    // Finite state machine for ride status transitions
+    var allowedTransitions = new Dictionary<RideStatus, RideStatus[]>
+    {
+        [RideStatus.Scheduled] = new[] { RideStatus.OnRoute, RideStatus.Cancelled },
+        [RideStatus.OnRoute] = new[] { RideStatus.Arrived, RideStatus.Cancelled },
+        [RideStatus.Arrived] = new[] { RideStatus.PassengerOnboard, RideStatus.Cancelled },
+        [RideStatus.PassengerOnboard] = new[] { RideStatus.Completed, RideStatus.Cancelled },
+        [RideStatus.Completed] = Array.Empty<RideStatus>(),
+        [RideStatus.Cancelled] = Array.Empty<RideStatus>()
+    };
+
+    var log = loggerFactory.CreateLogger("driver");
+    var driverUid = GetDriverUid(context);
+    if (string.IsNullOrEmpty(driverUid))
+        return Results.Unauthorized();
+
+    var booking = await repo.GetAsync(id);
+    if (booking is null)
+        return Results.NotFound(new { error = "Ride not found" });
+
+    // Verify driver owns this ride
+    if (booking.AssignedDriverUid != driverUid)
+        return Results.Forbid();
+
+    var currentStatus = booking.CurrentRideStatus ?? RideStatus.Scheduled;
+
+    // Validate state transition
+    if (!allowedTransitions.ContainsKey(currentStatus) ||
+        !allowedTransitions[currentStatus].Contains(request.NewStatus))
+    {
+        return Results.BadRequest(new
+        {
+            error = $"Invalid status transition from {currentStatus} to {request.NewStatus}"
+        });
+    }
+
+    // Update status
+    booking.CurrentRideStatus = request.NewStatus;
+
+    // Sync with BookingStatus
+    if (request.NewStatus == RideStatus.PassengerOnboard)
+        booking.Status = BookingStatus.InProgress;
+    else if (request.NewStatus == RideStatus.Completed)
+        booking.Status = BookingStatus.Completed;
+    else if (request.NewStatus == RideStatus.Cancelled)
+        booking.Status = BookingStatus.Cancelled;
+
+    await repo.UpdateStatusAsync(id, booking.Status);
+
+    log.LogInformation("Driver {Uid} updated ride {Id} status to {Status}",
+        driverUid, id, request.NewStatus);
+
+    return Results.Ok(new
+    {
+        message = "Status updated successfully",
+        rideId = id,
+        newStatus = request.NewStatus.ToString()
+    });
+})
+.WithName("UpdateRideStatus")
+.RequireAuthorization("DriverOnly");
+
+// POST /driver/location/update - Receive location updates (rate-limited)
+app.MapPost("/driver/location/update", (
+    [FromBody] LocationUpdate update,
+    HttpContext context,
+    ILocationService locationService,
+    IBookingRepository repo,
+    ILoggerFactory loggerFactory) =>
+{
+    var log = loggerFactory.CreateLogger("driver");
+    var driverUid = GetDriverUid(context);
+    if (string.IsNullOrEmpty(driverUid))
+        return Task.FromResult(Results.Unauthorized());
+
+    // Verify ride exists and belongs to driver
+    return repo.GetAsync(update.RideId).ContinueWith<IResult>(task =>
+    {
+        var booking = task.Result;
+        if (booking is null || booking.AssignedDriverUid != driverUid)
+            return Results.NotFound(new { error = "Ride not found" });
+
+        // Only accept updates for active rides
+        var activeStatuses = new[] { RideStatus.OnRoute, RideStatus.Arrived, RideStatus.PassengerOnboard };
+        if (!booking.CurrentRideStatus.HasValue || !activeStatuses.Contains(booking.CurrentRideStatus.Value))
+        {
+            return Results.BadRequest(new { error = "Location tracking not active for this ride" });
+        }
+
+        // Try to store location (rate-limited)
+        if (!locationService.TryUpdateLocation(driverUid, update))
+        {
+            return Results.StatusCode(429); // Too Many Requests
+        }
+
+        log.LogDebug("Location updated for ride {RideId} by driver {Uid}", update.RideId, driverUid);
+
+        return Results.Ok(new { message = "Location updated" });
+    });
+})
+.WithName("UpdateDriverLocation")
+.RequireAuthorization("DriverOnly");
+
+// GET /driver/location/{rideId} - Get latest location for a ride (admin/passenger use)
+app.MapGet("/driver/location/{rideId}", async (
+    string rideId,
+    ILocationService locationService,
+    IBookingRepository repo) =>
+{
+    var booking = await repo.GetAsync(rideId);
+    if (booking is null)
+        return Results.NotFound();
+
+    var location = locationService.GetLatestLocation(rideId);
+    if (location is null)
+        return Results.NotFound(new { message = "No recent location data" });
+
+    return Results.Ok(new
+    {
+        rideId = location.RideId,
+        latitude = location.Latitude,
+        longitude = location.Longitude,
+        timestamp = location.Timestamp,
+        ageSeconds = (DateTime.UtcNow - location.Timestamp).TotalSeconds
+    });
+})
+.WithName("GetRideLocation")
+.RequireAuthorization(); // Any authenticated user can track
 
 // ===================================================================
 // APPLICATION START
