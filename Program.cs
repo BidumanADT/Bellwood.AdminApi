@@ -21,6 +21,8 @@ builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
 // Repository services (file-backed storage)
 builder.Services.AddSingleton<IQuoteRepository, FileQuoteRepository>();
 builder.Services.AddSingleton<IBookingRepository, FileBookingRepository>();
+builder.Services.AddSingleton<IAffiliateRepository, FileAffiliateRepository>();
+builder.Services.AddSingleton<IDriverRepository, FileDriverRepository>();
 
 // Location tracking service (in-memory)
 builder.Services.AddSingleton<ILocationService, InMemoryLocationService>();
@@ -439,7 +441,8 @@ app.MapGet("/bookings/list", async ([FromQuery] int take, IBookingRepository rep
         r.VehicleClass,
         r.PickupLocation,
         r.DropoffLocation,
-        r.PickupDateTime
+        r.PickupDateTime,
+        AssignedDriverName = r.AssignedDriverName ?? "Unassigned"
     });
 
     return Results.Ok(list);
@@ -464,7 +467,9 @@ app.MapGet("/bookings/{id}", async (string id, IBookingRepository repo) =>
         rec.PickupLocation,
         rec.DropoffLocation,
         rec.PickupDateTime,
-        rec.Draft
+        rec.Draft,
+        AssignedDriverId = rec.AssignedDriverId,
+        AssignedDriverName = rec.AssignedDriverName ?? "Unassigned"
     });
 })
 .WithName("GetBooking")
@@ -734,6 +739,249 @@ app.MapGet("/driver/location/{rideId}", async (
 })
 .WithName("GetRideLocation")
 .RequireAuthorization(); // Any authenticated user can track
+
+// ===================================================================
+// AFFILIATE & DRIVER MANAGEMENT ENDPOINTS
+// ===================================================================
+
+// GET /affiliates/list - List all affiliates with nested drivers
+app.MapGet("/affiliates/list", async (IAffiliateRepository repo) =>
+{
+    var affiliates = await repo.GetAllAsync();
+    return Results.Ok(affiliates);
+})
+.WithName("ListAffiliates")
+.RequireAuthorization();
+
+// POST /affiliates - Create a new affiliate
+app.MapPost("/affiliates", async (
+    [FromBody] Affiliate affiliate,
+    IAffiliateRepository repo) =>
+{
+    if (string.IsNullOrWhiteSpace(affiliate.Name) || string.IsNullOrWhiteSpace(affiliate.Email))
+        return Results.BadRequest(new { error = "Name and Email are required" });
+
+    affiliate.Id = Guid.NewGuid().ToString("N");
+    affiliate.Drivers = new List<Driver>(); // Initialize empty drivers list
+
+    await repo.AddAsync(affiliate);
+    return Results.Created($"/affiliates/{affiliate.Id}", affiliate);
+})
+.WithName("CreateAffiliate")
+.RequireAuthorization();
+
+// GET /affiliates/{id} - Get affiliate by ID
+app.MapGet("/affiliates/{id}", async (string id, IAffiliateRepository repo) =>
+{
+    var affiliate = await repo.GetByIdAsync(id);
+    return affiliate is null ? Results.NotFound() : Results.Ok(affiliate);
+})
+.WithName("GetAffiliate")
+.RequireAuthorization();
+
+// PUT /affiliates/{id} - Update affiliate
+app.MapPut("/affiliates/{id}", async (
+    string id,
+    [FromBody] Affiliate affiliate,
+    IAffiliateRepository repo) =>
+{
+    var existing = await repo.GetByIdAsync(id);
+    if (existing is null)
+        return Results.NotFound();
+
+    affiliate.Id = id; // Ensure ID matches
+    await repo.UpdateAsync(affiliate);
+    return Results.Ok(affiliate);
+})
+.WithName("UpdateAffiliate")
+.RequireAuthorization();
+
+// DELETE /affiliates/{id} - Delete affiliate (cascade delete drivers)
+app.MapDelete("/affiliates/{id}", async (
+    string id,
+    IAffiliateRepository repo) =>
+{
+    var existing = await repo.GetByIdAsync(id);
+    if (existing is null)
+        return Results.NotFound();
+
+    await repo.DeleteAsync(id);
+    return Results.Ok(new { message = "Affiliate deleted", id });
+})
+.WithName("DeleteAffiliate")
+.RequireAuthorization();
+
+// POST /affiliates/{affiliateId}/drivers - Create driver under affiliate
+app.MapPost("/affiliates/{affiliateId}/drivers", async (
+    string affiliateId,
+    [FromBody] Driver driver,
+    IAffiliateRepository affiliateRepo,
+    IDriverRepository driverRepo) =>
+{
+    var affiliate = await affiliateRepo.GetByIdAsync(affiliateId);
+    if (affiliate is null)
+        return Results.NotFound(new { error = "Affiliate not found" });
+
+    if (string.IsNullOrWhiteSpace(driver.Name) || string.IsNullOrWhiteSpace(driver.Phone))
+        return Results.BadRequest(new { error = "Name and Phone are required" });
+
+    driver.Id = Guid.NewGuid().ToString("N");
+    driver.AffiliateId = affiliateId;
+
+    await driverRepo.AddAsync(driver);
+    return Results.Created($"/drivers/{driver.Id}", driver);
+})
+.WithName("CreateDriver")
+.RequireAuthorization();
+
+// GET /drivers/{id} - Get driver by ID
+app.MapGet("/drivers/{id}", async (string id, IDriverRepository repo) =>
+{
+    var driver = await repo.GetByIdAsync(id);
+    return driver is null ? Results.NotFound() : Results.Ok(driver);
+})
+.WithName("GetDriver")
+.RequireAuthorization();
+
+// PUT /drivers/{id} - Update driver
+app.MapPut("/drivers/{id}", async (
+    string id,
+    [FromBody] Driver driver,
+    IDriverRepository repo) =>
+{
+    var existing = await repo.GetByIdAsync(id);
+    if (existing is null)
+        return Results.NotFound();
+
+    driver.Id = id;
+    await repo.UpdateAsync(driver);
+    return Results.Ok(driver);
+})
+.WithName("UpdateDriver")
+.RequireAuthorization();
+
+// DELETE /drivers/{id} - Delete driver
+app.MapDelete("/drivers/{id}", async (
+    string id,
+    IDriverRepository repo) =>
+{
+    var existing = await repo.GetByIdAsync(id);
+    if (existing is null)
+        return Results.NotFound();
+
+    await repo.DeleteAsync(id);
+    return Results.Ok(new { message = "Driver deleted", id });
+})
+.WithName("DeleteDriver")
+.RequireAuthorization();
+
+// POST /bookings/{bookingId}/assign-driver - Assign driver to booking
+app.MapPost("/bookings/{bookingId}/assign-driver", async (
+    string bookingId,
+    [FromBody] DriverAssignmentRequest request,
+    IBookingRepository bookingRepo,
+    IDriverRepository driverRepo,
+    IAffiliateRepository affiliateRepo,
+    IEmailSender email,
+    ILoggerFactory loggerFactory) =>
+{
+    var log = loggerFactory.CreateLogger("bookings");
+
+    // Validate booking exists
+    var booking = await bookingRepo.GetAsync(bookingId);
+    if (booking is null)
+        return Results.NotFound(new { error = "Booking not found" });
+
+    // Validate driver exists
+    var driver = await driverRepo.GetByIdAsync(request.DriverId);
+    if (driver is null)
+        return Results.NotFound(new { error = "Driver not found" });
+
+    // Get affiliate for email notification
+    var affiliate = await affiliateRepo.GetByIdAsync(driver.AffiliateId);
+    if (affiliate is null)
+        return Results.NotFound(new { error = "Affiliate not found" });
+
+    // Update booking with driver assignment
+    await bookingRepo.UpdateDriverAssignmentAsync(
+        bookingId,
+        driver.Id,
+        driver.UserUid,
+        driver.Name);
+
+    // Send email notification to affiliate
+    try
+    {
+        await email.SendDriverAssignmentAsync(booking, driver, affiliate);
+        log.LogInformation("Driver {DriverName} assigned to booking {BookingId}, email sent to {AffiliateEmail}",
+            driver.Name, bookingId, affiliate.Email);
+    }
+    catch (Exception ex)
+    {
+        log.LogError(ex, "Failed to send driver assignment email for booking {BookingId}", bookingId);
+        // Continue anyway - assignment is saved
+    }
+
+    // Return updated booking info
+    var updatedBooking = await bookingRepo.GetAsync(bookingId);
+    return Results.Ok(new
+    {
+        bookingId,
+        assignedDriverId = driver.Id,
+        assignedDriverName = driver.Name,
+        assignedDriverUid = driver.UserUid,
+        status = updatedBooking?.Status.ToString(),
+        message = "Driver assigned successfully"
+    });
+})
+.WithName("AssignDriver")
+.RequireAuthorization();
+
+// POST /dev/seed-affiliates - Seed test affiliates and drivers (DEV ONLY)
+app.MapPost("/dev/seed-affiliates", async (
+    IAffiliateRepository affiliateRepo,
+    IDriverRepository driverRepo) =>
+{
+    var affiliates = new []
+    {
+        new Affiliate
+        {
+            Id = "aff-001",
+            Name = "Chicago Limo Service",
+            PointOfContact = "John Smith",
+            Phone = "312-555-1234",
+            Email = "dispatch@chicagolimo.com",
+            StreetAddress = "123 Main St",
+            City = "Chicago",
+            State = "IL",
+            Drivers = new List<Driver>
+            {
+                new() { Id = "drv-001", AffiliateId = "aff-001", Name = "Michael Johnson", Phone = "312-555-0001", UserUid = "driver-001" },
+                new() { Id = "drv-002", AffiliateId = "aff-001", Name = "Sarah Lee", Phone = "312-555-0002", UserUid = "driver-002" }
+            }
+        },
+        new Affiliate
+        {
+            Id = "aff-002",
+            Name = "Suburban Chauffeurs",
+            PointOfContact = "Emily Davis",
+            Phone = "847-555-9876",
+            Email = "emily@suburbanchauffeurs.com",
+            City = "Naperville",
+            State = "IL",
+            Drivers = new List<Driver>
+            {
+                new() { Id = "drv-003", AffiliateId = "aff-002", Name = "Robert Brown", Phone = "847-555-1000", UserUid = "driver-003" }
+            }
+        }
+    };
+
+    foreach (var aff in affiliates)
+        await affiliateRepo.AddAsync(aff);
+
+    return Results.Ok(new { added = affiliates.Length, message = "Affiliates and drivers seeded successfully" });
+})
+.WithName("SeedAffiliates");
 
 // ===================================================================
 // APPLICATION START

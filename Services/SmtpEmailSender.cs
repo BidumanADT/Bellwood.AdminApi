@@ -1,4 +1,5 @@
-﻿using BellwoodGlobal.Mobile.Models;
+﻿using Bellwood.AdminApi.Models;
+using BellwoodGlobal.Mobile.Models;
 using MailKit.Net.Smtp;
 using MailKit.Security;
 using Microsoft.Extensions.Options;
@@ -73,6 +74,74 @@ namespace Bellwood.AdminApi.Services
             {
                 HtmlBody = BuildCancellationHtmlBody(context, bookerName),
                 TextBody = BuildCancellationTextBody(context, bookerName)
+            };
+
+            msg.Body = builder.ToMessageBody();
+            await SendEmailAsync(msg);
+        }
+
+        public async Task SendDriverAssignmentAsync(BookingRecord booking, Driver driver, Affiliate affiliate)
+        {
+            var msg = new MimeMessage();
+            msg.From.Add(MailboxAddress.Parse(_opt.From));
+            msg.To.Add(MailboxAddress.Parse(affiliate.Email));
+            msg.Subject = $"Bellwood Elite - Driver Assignment - {booking.PickupDateTime:MMM dd, yyyy @ h:mm tt}";
+
+            string H(string? s) => WebUtility.HtmlEncode(s ?? "");
+
+            var builder = new BodyBuilder
+            {
+                HtmlBody = $@"
+                <h3 style=""color:#CBA135"">Bellwood Elite — Driver Assignment</h3>
+                <p>Hello {H(affiliate.PointOfContact ?? affiliate.Name)},</p>
+                <p>A driver from your affiliate has been assigned to a booking:</p>
+                
+                <hr/>
+                <h4>Driver Information</h4>
+                <p><b>Name:</b> {H(driver.Name)}</p>
+                <p><b>Phone:</b> {H(driver.Phone)}</p>
+                
+                <hr/>
+                <h4>Booking Details</h4>
+                <p><b>Reference ID:</b> {H(booking.Id)}</p>
+                <p><b>Passenger:</b> {H(booking.PassengerName)}</p>
+                <p><b>Pickup Date/Time:</b> {booking.PickupDateTime:G}</p>
+                <p><b>Pickup Location:</b> {H(booking.PickupLocation)}</p>
+                <p><b>Dropoff Location:</b> {H(booking.DropoffLocation ?? "As Directed")}</p>
+                <p><b>Vehicle Class:</b> {H(booking.VehicleClass)}</p>
+                <p><b>Passenger Count:</b> {booking.Draft.PassengerCount}</p>
+                
+                <hr/>
+                <p>Please ensure the driver is prepared and available for this assignment.</p>
+                <p>Thank you,<br/>Bellwood Elite Team</p>",
+
+                TextBody = $@"Bellwood Elite — Driver Assignment
+
+Hello {affiliate.PointOfContact ?? affiliate.Name},
+
+A driver from your affiliate has been assigned to a booking:
+
+----------------------------------------
+Driver Information
+----------------------------------------
+Name: {driver.Name}
+Phone: {driver.Phone}
+
+----------------------------------------
+Booking Details
+----------------------------------------
+Reference ID: {booking.Id}
+Passenger: {booking.PassengerName}
+Pickup Date/Time: {booking.PickupDateTime:G}
+Pickup Location: {booking.PickupLocation}
+Dropoff Location: {booking.DropoffLocation ?? "As Directed"}
+Vehicle Class: {booking.VehicleClass}
+Passenger Count: {booking.Draft.PassengerCount}
+
+Please ensure the driver is prepared and available for this assignment.
+
+Thank you,
+Bellwood Elite Team"
             };
 
             msg.Body = builder.ToMessageBody();

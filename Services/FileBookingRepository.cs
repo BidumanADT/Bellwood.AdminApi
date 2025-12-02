@@ -60,6 +60,36 @@ public sealed class FileBookingRepository : IBookingRepository
         finally { _gate.Release(); }
     }
 
+    public async Task UpdateDriverAssignmentAsync(string bookingId, string? driverId, string? driverUid, string? driverName, CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var list = await ReadAllAsync();
+            var rec = list.FirstOrDefault(x => x.Id == bookingId);
+            if (rec is null) return;
+
+            rec.AssignedDriverId = driverId;
+            rec.AssignedDriverUid = driverUid;
+            rec.AssignedDriverName = driverName;
+
+            // Normalize status if still in requested/confirmed
+            if (rec.Status == BookingStatus.Requested || rec.Status == BookingStatus.Confirmed)
+            {
+                rec.Status = BookingStatus.Scheduled;
+            }
+
+            // Initialize RideStatus if not set
+            if (!rec.CurrentRideStatus.HasValue)
+            {
+                rec.CurrentRideStatus = RideStatus.Scheduled;
+            }
+
+            await WriteAllAsync(list);
+        }
+        finally { _gate.Release(); }
+    }
+
     private async Task<List<BookingRecord>> ReadAllAsync()
     {
         using var fs = File.OpenRead(_filePath);

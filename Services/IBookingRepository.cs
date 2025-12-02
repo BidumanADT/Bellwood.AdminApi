@@ -8,5 +8,6 @@ namespace Bellwood.AdminApi.Services
         Task<BookingRecord?> GetAsync(string id, CancellationToken ct = default);
         Task<IReadOnlyList<BookingRecord>> ListAsync(int take = 50, CancellationToken ct = default);
         Task UpdateStatusAsync(string id, BookingStatus status, CancellationToken ct = default);
+        Task UpdateDriverAssignmentAsync(string bookingId, string? driverId, string? driverUid, string? driverName, CancellationToken ct = default);
     }
 }
