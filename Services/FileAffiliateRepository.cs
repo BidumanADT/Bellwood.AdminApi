@@ -12,7 +12,8 @@ public sealed class FileAffiliateRepository : IAffiliateRepository
     private static readonly JsonSerializerOptions _opts = new()
     {
         WriteIndented = true,
-        Converters = { new JsonStringEnumConverter() }
+        Converters = { new JsonStringEnumConverter() },
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
     public FileAffiliateRepository(IHostEnvironment env)
@@ -45,8 +46,22 @@ public sealed class FileAffiliateRepository : IAffiliateRepository
         try
         {
             var list = await ReadAllAsync();
+
+            // Ensure GUID-based ID for scalability
+            if (string.IsNullOrWhiteSpace(affiliate.Id))
+            {
+                affiliate.Id = Guid.NewGuid().ToString("N");
+            }
+
+            // Clear drivers list before persisting (drivers stored separately)
+            var driversToAdd = affiliate.Drivers?.ToList() ?? new();
+            affiliate.Drivers = new();
+
             list.Add(affiliate);
             await WriteAllAsync(list);
+
+            // Restore drivers list for the returned object
+            affiliate.Drivers = driversToAdd;
         }
         finally { _gate.Release(); }
     }
@@ -60,9 +75,16 @@ public sealed class FileAffiliateRepository : IAffiliateRepository
             var existing = list.FirstOrDefault(a => a.Id == affiliate.Id);
             if (existing is null) return;
 
+            // Preserve any drivers reference but don't persist it
+            var driversRef = affiliate.Drivers;
+            affiliate.Drivers = new();
+
             list.Remove(existing);
             list.Add(affiliate);
             await WriteAllAsync(list);
+
+            // Restore drivers list
+            affiliate.Drivers = driversRef;
         }
         finally { _gate.Release(); }
     }
@@ -86,11 +108,25 @@ public sealed class FileAffiliateRepository : IAffiliateRepository
     private async Task<List<Affiliate>> ReadAllAsync()
     {
         using var fs = File.OpenRead(_filePath);
-        return await JsonSerializer.DeserializeAsync<List<Affiliate>>(fs, _opts) ?? new();
+        var affiliates = await JsonSerializer.DeserializeAsync<List<Affiliate>>(fs, _opts) ?? new();
+        
+        // Ensure Drivers list is initialized (won't be in storage)
+        foreach (var aff in affiliates)
+        {
+            aff.Drivers ??= new();
+        }
+        
+        return affiliates;
     }
 
     private async Task WriteAllAsync(List<Affiliate> list)
     {
+        // Don't persist drivers - they're stored separately
+        foreach (var aff in list)
+        {
+            aff.Drivers = new();
+        }
+
         using var fs = File.Create(_filePath);
         await JsonSerializer.SerializeAsync(fs, list, _opts);
     }

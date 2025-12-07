@@ -13,5 +13,11 @@ public sealed class Affiliate
     public string? StreetAddress { get; set; }
     public string? City { get; set; }
     public string? State { get; set; }
+
+    /// <summary>
+    /// Drivers associated with this affiliate.
+    /// Note: For scalability, drivers are stored separately and populated on-demand.
+    /// This list is populated when retrieving affiliates for display purposes.
+    /// </summary>
     public List<Driver> Drivers { get; set; } = new();
 }
