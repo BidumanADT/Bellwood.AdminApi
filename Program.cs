@@ -50,7 +50,8 @@ builder.Services.AddAuthentication(options =>
         ValidateIssuerSigningKey = true,
         IssuerSigningKey = signingKey,
         ValidateLifetime = true,
-        ClockSkew = TimeSpan.Zero
+        ClockSkew = TimeSpan.Zero,
+        RoleClaimType = "role"
     };
 });
 
@@ -58,7 +59,7 @@ builder.Services.AddAuthentication(options =>
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("DriverOnly", policy =>
-        policy.RequireClaim("role", "driver"));
+        policy.RequireRole("driver"));
 });
 
 // CORS for development
