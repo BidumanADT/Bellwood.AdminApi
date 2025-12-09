@@ -38,8 +38,10 @@ public sealed class BookingRecord
     public BookingStatus Status { get; set; } = BookingStatus.Requested;
     public DateTime? CancelledAt { get; set; }
 
-    // Driver assignment
-    public string? AssignedDriverUid { get; set; }
+    // Driver assignment (both IDs for different purposes)
+    public string? AssignedDriverId { get; set; }      // Links to Driver entity
+    public string? AssignedDriverUid { get; set; }     // Links to AuthServer UID for driver app
+    public string? AssignedDriverName { get; set; }    // Cached display name
     public RideStatus? CurrentRideStatus { get; set; }
 
     // Flattened fields for list views

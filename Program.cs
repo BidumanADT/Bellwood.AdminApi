@@ -21,6 +21,8 @@ builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
 // Repository services (file-backed storage)
 builder.Services.AddSingleton<IQuoteRepository, FileQuoteRepository>();
 builder.Services.AddSingleton<IBookingRepository, FileBookingRepository>();
+builder.Services.AddSingleton<IAffiliateRepository, FileAffiliateRepository>();
+builder.Services.AddSingleton<IDriverRepository, FileDriverRepository>();
 
 // Location tracking service (in-memory)
 builder.Services.AddSingleton<ILocationService, InMemoryLocationService>();
@@ -41,6 +43,10 @@ builder.Services.AddAuthentication(options =>
 })
 .AddJwtBearer(options =>
 {
+    // CRITICAL: Disable default claim type mapping so "role" stays as "role"
+    // instead of being mapped to "http://schemas.microsoft.com/ws/2008/06/identity/claims/role"
+    options.MapInboundClaims = false;
+    
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuer = false,
@@ -48,7 +54,66 @@ builder.Services.AddAuthentication(options =>
         ValidateIssuerSigningKey = true,
         IssuerSigningKey = signingKey,
         ValidateLifetime = true,
-        ClockSkew = TimeSpan.Zero
+        ClockSkew = TimeSpan.Zero,
+        RoleClaimType = "role",      // Map "role" claim to roles
+        NameClaimType = "sub"        // Map "sub" claim to username
+    };
+    
+    // Add authentication event handlers for debugging
+    options.Events = new JwtBearerEvents
+    {
+        OnAuthenticationFailed = context =>
+        {
+            Console.WriteLine($"?? Authentication FAILED: {context.Exception.GetType().Name}");
+            Console.WriteLine($"   Message: {context.Exception.Message}");
+            if (context.Exception.InnerException != null)
+            {
+                Console.WriteLine($"   Inner: {context.Exception.InnerException.Message}");
+            }
+            return Task.CompletedTask;
+        },
+        OnTokenValidated = context =>
+        {
+            var claims = context.Principal?.Claims
+                .Select(c => $"{c.Type}={c.Value}")
+                .ToList() ?? new List<string>();
+            
+            Console.WriteLine($"? Token VALIDATED successfully");
+            Console.WriteLine($"   User: {context.Principal?.Identity?.Name ?? "N/A"}");
+            Console.WriteLine($"   Claims: {string.Join(", ", claims)}");
+            Console.WriteLine($"   IsAuthenticated: {context.Principal?.Identity?.IsAuthenticated}");
+            
+            // Check for role claim specifically
+            var roleClaim = context.Principal?.FindFirst("role");
+            if (roleClaim != null)
+            {
+                Console.WriteLine($"   ? Role found: {roleClaim.Value}");
+            }
+            else
+            {
+                Console.WriteLine($"   ??  NO ROLE CLAIM FOUND!");
+            }
+            
+            return Task.CompletedTask;
+        },
+        OnChallenge = context =>
+        {
+            Console.WriteLine($"?? Authentication CHALLENGE");
+            Console.WriteLine($"   Error: {context.Error}");
+            Console.WriteLine($"   ErrorDescription: {context.ErrorDescription}");
+            return Task.CompletedTask;
+        },
+        OnForbidden = context =>
+        {
+            Console.WriteLine($"?? Authorization FORBIDDEN (403)");
+            Console.WriteLine($"   User: {context.Principal?.Identity?.Name ?? "Anonymous"}");
+            Console.WriteLine($"   IsAuthenticated: {context.Principal?.Identity?.IsAuthenticated}");
+            
+            var roles = context.Principal?.FindAll("role").Select(c => c.Value).ToList();
+            Console.WriteLine($"   Roles: {(roles?.Any() == true ? string.Join(", ", roles) : "NONE")}");
+            
+            return Task.CompletedTask;
+        }
     };
 });
 
@@ -56,7 +121,7 @@ builder.Services.AddAuthentication(options =>
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("DriverOnly", policy =>
-        policy.RequireClaim("role", "driver"));
+        policy.RequireRole("driver"));
 });
 
 // CORS for development
@@ -307,33 +372,55 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
 
     var samples = new[]
     {
+        // Requested - Initial booking request from passenger app
+        new BookingRecord {
+            CreatedUtc = now.AddMinutes(-10),
+            Status = BookingStatus.Requested,
+            BookerName = "Tom Anderson",
+            PassengerName = "Maria Garcia",
+            VehicleClass = "Sedan",
+            PickupLocation = "Union Station, Chicago",
+            DropoffLocation = "Willis Tower",
+            PickupDateTime = now.AddHours(24),
+            Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
+                Booker = new() { FirstName = "Tom", LastName = "Anderson", PhoneNumber = "312-555-1111", EmailAddress = "tom.anderson@example.com" },
+                Passenger = new() { FirstName = "Maria", LastName = "Garcia", PhoneNumber = "312-555-2222", EmailAddress = "maria.garcia@example.com" },
+                VehicleClass = "Sedan",
+                PickupDateTime = now.AddHours(24),
+                PickupLocation = "Union Station, Chicago",
+                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
+                DropoffLocation = "Willis Tower",
+                PassengerCount = 1, CheckedBags = 1, CarryOnBags = 1
+            }
+        },
+        // Confirmed - Staff approved booking
+        new BookingRecord {
+            CreatedUtc = now.AddMinutes(-20),
+            Status = BookingStatus.Confirmed,
+            BookerName = "James Wilson",
+            PassengerName = "Patricia Brown",
+            VehicleClass = "SUV",
+            PickupLocation = "Navy Pier",
+            DropoffLocation = "Midway Airport",
+            PickupDateTime = now.AddHours(36),
+            Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
+                Booker = new() { FirstName = "James", LastName = "Wilson", PhoneNumber = "312-555-3333", EmailAddress = "james.wilson@example.com" },
+                Passenger = new() { FirstName = "Patricia", LastName = "Brown", PhoneNumber = "312-555-4444", EmailAddress = "patricia.brown@example.com" },
+                VehicleClass = "SUV",
+                PickupDateTime = now.AddHours(36),
+                PickupLocation = "Navy Pier",
+                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
+                DropoffLocation = "Midway Airport",
+                PassengerCount = 3, CheckedBags = 3, CarryOnBags = 2
+            }
+        },
+        // Scheduled - Charlie's first ride (5 hours from now)
         new BookingRecord {
             CreatedUtc = now.AddMinutes(-5),
             Status = BookingStatus.Scheduled,
-            AssignedDriverUid = "driver-001", // Test driver UID
-            CurrentRideStatus = RideStatus.Scheduled,
-            BookerName = "Alice Morgan",
-            PassengerName = "Taylor Reed",
-            VehicleClass = "SUV",
-            PickupLocation = "O'Hare FBO",
-            DropoffLocation = "Downtown Chicago",
-            PickupDateTime = now.AddHours(3),
-            Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
-                Booker = new() { FirstName = "Alice", LastName = "Morgan", PhoneNumber = "312-555-7777", EmailAddress = "alice.morgan@example.com" },
-                Passenger = new() { FirstName = "Taylor", LastName = "Reed", PhoneNumber = "773-555-1122", EmailAddress = "taylor.reed@example.com" },
-                VehicleClass = "SUV",
-                PickupDateTime = now.AddHours(3),
-                PickupLocation = "O'Hare FBO",
-                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.MeetAndGreet,
-                PickupSignText = "REED / Bellwood",
-                DropoffLocation = "Downtown Chicago",
-                PassengerCount = 2, CheckedBags = 2, CarryOnBags = 2
-            }
-        },
-        new BookingRecord {
-            CreatedUtc = now.AddHours(-2),
-            Status = BookingStatus.Scheduled,
-            AssignedDriverUid = "driver-001", // Same driver
+            AssignedDriverId = "TBD-driver-id",
+            AssignedDriverUid = "driver-001", // Charlie
+            AssignedDriverName = "Charlie Johnson",
             CurrentRideStatus = RideStatus.Scheduled,
             BookerName = "Chris Bailey",
             PassengerName = "Jordan Chen",
@@ -342,20 +429,75 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
             DropoffLocation = "Midway Airport",
             PickupDateTime = now.AddHours(5),
             Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
-                Booker = new() { FirstName="Chris", LastName="Bailey" },
-                Passenger = new() { FirstName="Jordan", LastName="Chen" },
+                Booker = new() { FirstName="Chris", LastName="Bailey", PhoneNumber = "312-555-5555", EmailAddress = "chris.bailey@example.com" },
+                Passenger = new() { FirstName="Jordan", LastName="Chen", PhoneNumber = "312-555-6666", EmailAddress = "jordan.chen@example.com" },
                 VehicleClass = "Sedan",
                 PickupDateTime = now.AddHours(5),
                 PickupLocation = "Langham Hotel",
                 PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "Midway Airport",
-                PassengerCount = 1
+                PassengerCount = 1, CheckedBags = 1
             }
         },
+        // Scheduled - Charlie's second ride (48 hours from now)
+        new BookingRecord {
+            CreatedUtc = now.AddMinutes(-3),
+            Status = BookingStatus.Scheduled,
+            AssignedDriverId = "TBD-driver-id",
+            AssignedDriverUid = "driver-001", // Charlie
+            AssignedDriverName = "Charlie Johnson",
+            CurrentRideStatus = RideStatus.Scheduled,
+            BookerName = "David Miller",
+            PassengerName = "Emma Watson",
+            VehicleClass = "S-Class",
+            PickupLocation = "O'Hare FBO",
+            DropoffLocation = "Peninsula Hotel, Chicago",
+            PickupDateTime = now.AddHours(48),
+            Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
+                Booker = new() { FirstName="David", LastName="Miller", PhoneNumber = "312-555-7777", EmailAddress = "david.miller@example.com" },
+                Passenger = new() { FirstName="Emma", LastName="Watson", PhoneNumber = "312-555-8888", EmailAddress = "emma.watson@example.com" },
+                VehicleClass = "S-Class",
+                PickupDateTime = now.AddHours(48),
+                PickupLocation = "O'Hare FBO",
+                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.MeetAndGreet,
+                PickupSignText = "WATSON / Bellwood",
+                DropoffLocation = "Peninsula Hotel, Chicago",
+                PassengerCount = 2, CheckedBags = 2, CarryOnBags = 1
+            }
+        },
+        // InProgress - Driver has picked up passenger
+        new BookingRecord {
+            CreatedUtc = now.AddHours(-1),
+            Status = BookingStatus.InProgress,
+            AssignedDriverId = "TBD-driver-id",
+            AssignedDriverUid = "driver-002", // Sarah
+            AssignedDriverName = "Sarah Lee",
+            CurrentRideStatus = RideStatus.PassengerOnboard,
+            BookerName = "Alice Morgan",
+            PassengerName = "Taylor Reed",
+            VehicleClass = "SUV",
+            PickupLocation = "O'Hare FBO",
+            DropoffLocation = "Downtown Chicago",
+            PickupDateTime = now.AddMinutes(-30),
+            Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
+                Booker = new() { FirstName = "Alice", LastName = "Morgan", PhoneNumber = "312-555-7777", EmailAddress = "alice.morgan@example.com" },
+                Passenger = new() { FirstName = "Taylor", LastName = "Reed", PhoneNumber = "773-555-1122", EmailAddress = "taylor.reed@example.com" },
+                VehicleClass = "SUV",
+                PickupDateTime = now.AddMinutes(-30),
+                PickupLocation = "O'Hare FBO",
+                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.MeetAndGreet,
+                PickupSignText = "REED / Bellwood",
+                DropoffLocation = "Downtown Chicago",
+                PassengerCount = 2, CheckedBags = 2, CarryOnBags = 2
+            }
+        },
+        // Completed - Ride finished successfully
         new BookingRecord {
             CreatedUtc = now.AddDays(-1),
             Status = BookingStatus.Completed,
-            AssignedDriverUid = "driver-002", // Different driver
+            AssignedDriverId = "TBD-driver-id",
+            AssignedDriverUid = "driver-002", // Sarah
+            AssignedDriverName = "Sarah Lee",
             CurrentRideStatus = RideStatus.Completed,
             BookerName = "Lisa Gomez",
             PassengerName = "Derek James",
@@ -364,12 +506,64 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
             DropoffLocation = "Navy Pier",
             PickupDateTime = now.AddDays(-1).AddHours(2),
             Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
-                Booker = new() { FirstName="Lisa", LastName="Gomez" },
-                Passenger = new() { FirstName="Derek", LastName="James" },
+                Booker = new() { FirstName="Lisa", LastName="Gomez", PhoneNumber = "312-555-9999", EmailAddress = "lisa.gomez@example.com" },
+                Passenger = new() { FirstName="Derek", LastName="James", PhoneNumber = "312-555-0000", EmailAddress = "derek.james@example.com" },
                 VehicleClass = "S-Class",
                 PickupDateTime = now.AddDays(-1).AddHours(2),
                 PickupLocation = "O'Hare International",
+                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "Navy Pier",
+                PassengerCount = 2
+            }
+        },
+        // Cancelled - Booking was cancelled
+        new BookingRecord {
+            CreatedUtc = now.AddDays(-2),
+            Status = BookingStatus.Cancelled,
+            CancelledAt = now.AddDays(-2).AddHours(1),
+            AssignedDriverId = "TBD-driver-id",
+            AssignedDriverUid = "driver-003", // Robert
+            AssignedDriverName = "Robert Brown",
+            CurrentRideStatus = RideStatus.Cancelled,
+            BookerName = "Michael Davis",
+            PassengerName = "Jennifer Taylor",
+            VehicleClass = "Sedan",
+            PickupLocation = "Midway Airport",
+            DropoffLocation = "Naperville",
+            PickupDateTime = now.AddDays(-2).AddHours(3),
+            Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
+                Booker = new() { FirstName="Michael", LastName="Davis", PhoneNumber = "847-555-1111", EmailAddress = "michael.davis@example.com" },
+                Passenger = new() { FirstName="Jennifer", LastName="Taylor", PhoneNumber = "847-555-2222", EmailAddress = "jennifer.taylor@example.com" },
+                VehicleClass = "Sedan",
+                PickupDateTime = now.AddDays(-2).AddHours(3),
+                PickupLocation = "Midway Airport",
+                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
+                DropoffLocation = "Naperville",
+                PassengerCount = 1
+            }
+        },
+        // NoShow - Passenger didn't show up
+        new BookingRecord {
+            CreatedUtc = now.AddDays(-3),
+            Status = BookingStatus.NoShow,
+            AssignedDriverId = "TBD-driver-id",
+            AssignedDriverUid = "driver-003", // Robert
+            AssignedDriverName = "Robert Brown",
+            CurrentRideStatus = RideStatus.Cancelled,
+            BookerName = "Robert Martinez",
+            PassengerName = "Susan Clark",
+            VehicleClass = "SUV",
+            PickupLocation = "Union Station",
+            DropoffLocation = "O'Hare Airport",
+            PickupDateTime = now.AddDays(-3).AddHours(2),
+            Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
+                Booker = new() { FirstName="Robert", LastName="Martinez", PhoneNumber = "847-555-3333", EmailAddress = "robert.martinez@example.com" },
+                Passenger = new() { FirstName="Susan", LastName="Clark", PhoneNumber = "847-555-4444", EmailAddress = "susan.clark@example.com" },
+                VehicleClass = "SUV",
+                PickupDateTime = now.AddDays(-3).AddHours(2),
+                PickupLocation = "Union Station",
+                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
+                DropoffLocation = "O'Hare Airport",
                 PassengerCount = 2
             }
         }
@@ -439,7 +633,10 @@ app.MapGet("/bookings/list", async ([FromQuery] int take, IBookingRepository rep
         r.VehicleClass,
         r.PickupLocation,
         r.DropoffLocation,
-        r.PickupDateTime
+        r.PickupDateTime,
+        AssignedDriverId = r.AssignedDriverId,
+        AssignedDriverUid = r.AssignedDriverUid,
+        AssignedDriverName = r.AssignedDriverName ?? "Unassigned"
     });
 
     return Results.Ok(list);
@@ -464,7 +661,10 @@ app.MapGet("/bookings/{id}", async (string id, IBookingRepository repo) =>
         rec.PickupLocation,
         rec.DropoffLocation,
         rec.PickupDateTime,
-        rec.Draft
+        rec.Draft,
+        AssignedDriverId = rec.AssignedDriverId,
+        AssignedDriverUid = rec.AssignedDriverUid,
+        AssignedDriverName = rec.AssignedDriverName ?? "Unassigned"
     });
 })
 .WithName("GetBooking")
@@ -734,6 +934,345 @@ app.MapGet("/driver/location/{rideId}", async (
 })
 .WithName("GetRideLocation")
 .RequireAuthorization(); // Any authenticated user can track
+
+// ===================================================================
+// AFFILIATE & DRIVER MANAGEMENT ENDPOINTS
+// ===================================================================
+
+// GET /affiliates/list - List all affiliates with nested drivers
+app.MapGet("/affiliates/list", async (IAffiliateRepository affiliateRepo, IDriverRepository driverRepo) =>
+{
+    var affiliates = await affiliateRepo.GetAllAsync();
+    
+    // Populate drivers for each affiliate from separate storage
+    foreach (var affiliate in affiliates)
+    {
+        affiliate.Drivers = await driverRepo.GetByAffiliateIdAsync(affiliate.Id);
+    }
+    
+    return Results.Ok(affiliates);
+})
+.WithName("ListAffiliates")
+.RequireAuthorization();
+
+// POST /affiliates - Create a new affiliate
+app.MapPost("/affiliates", async (
+    [FromBody] Affiliate affiliate,
+    IAffiliateRepository repo) =>
+{
+    if (string.IsNullOrWhiteSpace(affiliate.Name) || string.IsNullOrWhiteSpace(affiliate.Email))
+        return Results.BadRequest(new { error = "Name and Email are required" });
+
+    affiliate.Id = Guid.NewGuid().ToString("N");
+    affiliate.Drivers = new List<Driver>(); // Initialize empty drivers list
+
+    await repo.AddAsync(affiliate);
+    return Results.Created($"/affiliates/{affiliate.Id}", affiliate);
+})
+.WithName("CreateAffiliate")
+.RequireAuthorization();
+
+// GET /affiliates/{id} - Get affiliate by ID
+app.MapGet("/affiliates/{id}", async (string id, IAffiliateRepository affiliateRepo, IDriverRepository driverRepo) =>
+{
+    var affiliate = await affiliateRepo.GetByIdAsync(id);
+    if (affiliate is null) return Results.NotFound();
+    
+    // Populate drivers from separate storage
+    affiliate.Drivers = await driverRepo.GetByAffiliateIdAsync(id);
+    
+    return Results.Ok(affiliate);
+})
+.WithName("GetAffiliate")
+.RequireAuthorization();
+
+// PUT /affiliates/{id} - Update affiliate
+app.MapPut("/affiliates/{id}", async (
+    string id,
+    [FromBody] Affiliate affiliate,
+    IAffiliateRepository repo) =>
+{
+    var existing = await repo.GetByIdAsync(id);
+    if (existing is null)
+        return Results.NotFound();
+
+    affiliate.Id = id; // Ensure ID matches
+    await repo.UpdateAsync(affiliate);
+    return Results.Ok(affiliate);
+})
+.WithName("UpdateAffiliate")
+.RequireAuthorization();
+
+// DELETE /affiliates/{id} - Delete affiliate (cascade delete drivers)
+app.MapDelete("/affiliates/{id}", async (
+    string id,
+    IAffiliateRepository affiliateRepo,
+    IDriverRepository driverRepo) =>
+{
+    var existing = await affiliateRepo.GetByIdAsync(id);
+    if (existing is null)
+        return Results.NotFound();
+
+    // Cascade delete all drivers belonging to this affiliate
+    await driverRepo.DeleteByAffiliateIdAsync(id);
+    
+    await affiliateRepo.DeleteAsync(id);
+    return Results.Ok(new { message = "Affiliate and associated drivers deleted", id });
+})
+.WithName("DeleteAffiliate")
+.RequireAuthorization();
+
+// POST /affiliates/{affiliateId}/drivers - Create driver under affiliate
+app.MapPost("/affiliates/{affiliateId}/drivers", async (
+    string affiliateId,
+    [FromBody] Driver driver,
+    IAffiliateRepository affiliateRepo,
+    IDriverRepository driverRepo) =>
+{
+    var affiliate = await affiliateRepo.GetByIdAsync(affiliateId);
+    if (affiliate is null)
+        return Results.NotFound(new { error = "Affiliate not found" });
+
+    if (string.IsNullOrWhiteSpace(driver.Name) || string.IsNullOrWhiteSpace(driver.Phone))
+        return Results.BadRequest(new { error = "Name and Phone are required" });
+
+    // Validate UserUid uniqueness if provided
+    if (!string.IsNullOrWhiteSpace(driver.UserUid))
+    {
+        var isUnique = await driverRepo.IsUserUidUniqueAsync(driver.UserUid);
+        if (!isUnique)
+            return Results.BadRequest(new { error = $"UserUid '{driver.UserUid}' is already assigned to another driver" });
+    }
+
+    driver.Id = Guid.NewGuid().ToString("N");
+    driver.AffiliateId = affiliateId;
+
+    await driverRepo.AddAsync(driver);
+    return Results.Created($"/drivers/{driver.Id}", driver);
+})
+.WithName("CreateDriver")
+.RequireAuthorization();
+
+// GET /drivers/list - List all drivers
+app.MapGet("/drivers/list", async (IDriverRepository repo) =>
+{
+    var drivers = await repo.GetAllAsync();
+    return Results.Ok(drivers);
+})
+.WithName("ListDrivers")
+.RequireAuthorization();
+
+// GET /drivers/by-uid/{userUid} - Get driver by AuthServer UserUid
+app.MapGet("/drivers/by-uid/{userUid}", async (string userUid, IDriverRepository repo) =>
+{
+    var driver = await repo.GetByUserUidAsync(userUid);
+    return driver is null ? Results.NotFound(new { error = "No driver found with this UserUid" }) : Results.Ok(driver);
+})
+.WithName("GetDriverByUserUid")
+.RequireAuthorization();
+
+// GET /drivers/{id} - Get driver by ID
+app.MapGet("/drivers/{id}", async (string id, IDriverRepository repo) =>
+{
+    var driver = await repo.GetByIdAsync(id);
+    return driver is null ? Results.NotFound() : Results.Ok(driver);
+})
+.WithName("GetDriver")
+.RequireAuthorization();
+
+// PUT /drivers/{id} - Update driver
+app.MapPut("/drivers/{id}", async (
+    string id,
+    [FromBody] Driver driver,
+    IDriverRepository repo) =>
+{
+    var existing = await repo.GetByIdAsync(id);
+    if (existing is null)
+        return Results.NotFound();
+
+    // Validate UserUid uniqueness if changed
+    if (!string.IsNullOrWhiteSpace(driver.UserUid))
+    {
+        var isUnique = await repo.IsUserUidUniqueAsync(driver.UserUid, excludeDriverId: id);
+        if (!isUnique)
+            return Results.BadRequest(new { error = $"UserUid '{driver.UserUid}' is already assigned to another driver" });
+    }
+
+    driver.Id = id;
+    driver.AffiliateId = existing.AffiliateId; // Preserve affiliate association
+    await repo.UpdateAsync(driver);
+    return Results.Ok(driver);
+})
+.WithName("UpdateDriver")
+.RequireAuthorization();
+
+// DELETE /drivers/{id} - Delete driver
+app.MapDelete("/drivers/{id}", async (
+    string id,
+    IDriverRepository repo) =>
+{
+    var existing = await repo.GetByIdAsync(id);
+    if (existing is null)
+        return Results.NotFound();
+
+    await repo.DeleteAsync(id);
+    return Results.Ok(new { message = "Driver deleted", id });
+})
+.WithName("DeleteDriver")
+.RequireAuthorization();
+
+// POST /bookings/{bookingId}/assign-driver - Assign driver to booking
+app.MapPost("/bookings/{bookingId}/assign-driver", async (
+    string bookingId,
+    [FromBody] DriverAssignmentRequest request,
+    IBookingRepository bookingRepo,
+    IDriverRepository driverRepo,
+    IAffiliateRepository affiliateRepo,
+    IEmailSender email,
+    ILoggerFactory loggerFactory) =>
+{
+    var log = loggerFactory.CreateLogger("bookings");
+
+    // Validate booking exists
+    var booking = await bookingRepo.GetAsync(bookingId);
+    if (booking is null)
+        return Results.NotFound(new { error = "Booking not found" });
+
+    // Validate driver exists
+    var driver = await driverRepo.GetByIdAsync(request.DriverId);
+    if (driver is null)
+        return Results.NotFound(new { error = "Driver not found" });
+
+    // CRITICAL: Validate driver has UserUid for driver app authentication
+    if (string.IsNullOrWhiteSpace(driver.UserUid))
+    {
+        return Results.BadRequest(new 
+        { 
+            error = "Cannot assign driver without a UserUid. Please link the driver to an AuthServer user first.",
+            driverId = driver.Id,
+            driverName = driver.Name
+        });
+    }
+
+    // Get affiliate for email notification
+    var affiliate = await affiliateRepo.GetByIdAsync(driver.AffiliateId);
+    if (affiliate is null)
+        return Results.NotFound(new { error = "Affiliate not found" });
+
+    // Update booking with driver assignment
+    await bookingRepo.UpdateDriverAssignmentAsync(
+        bookingId,
+        driver.Id,
+        driver.UserUid,
+        driver.Name);
+
+    // Send email notification to affiliate
+    try
+    {
+        await email.SendDriverAssignmentAsync(booking, driver, affiliate);
+        log.LogInformation("Driver {DriverName} (UserUid: {UserUid}) assigned to booking {BookingId}, email sent to {AffiliateEmail}",
+            driver.Name, driver.UserUid, bookingId, affiliate.Email);
+    }
+    catch (Exception ex)
+    {
+        log.LogError(ex, "Failed to send driver assignment email for booking {BookingId}", bookingId);
+        // Continue anyway - assignment is saved
+    }
+
+    // Return updated booking info
+    var updatedBooking = await bookingRepo.GetAsync(bookingId);
+    return Results.Ok(new
+    {
+        bookingId,
+        assignedDriverId = driver.Id,
+        assignedDriverName = driver.Name,
+        assignedDriverUid = driver.UserUid,
+        status = updatedBooking?.Status.ToString(),
+        message = "Driver assigned successfully"
+    });
+})
+.WithName("AssignDriver")
+.RequireAuthorization();
+
+// POST /dev/seed-affiliates - Seed test affiliates and drivers (DEV ONLY)
+app.MapPost("/dev/seed-affiliates", async (
+    IAffiliateRepository affiliateRepo,
+    IDriverRepository driverRepo) =>
+{
+    // Define affiliates (without embedded drivers - they're stored separately)
+    var affiliates = new[]
+    {
+        new Affiliate
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Name = "Chicago Limo Service",
+            PointOfContact = "John Smith",
+            Phone = "312-555-1234",
+            Email = "dispatch@chicagolimo.com",
+            StreetAddress = "123 Main St",
+            City = "Chicago",
+            State = "IL"
+        },
+        new Affiliate
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Name = "Suburban Chauffeurs",
+            PointOfContact = "Emily Davis",
+            Phone = "847-555-9876",
+            Email = "emily@suburbanchauffeurs.com",
+            City = "Naperville",
+            State = "IL"
+        }
+    };
+
+    // Save affiliates
+    foreach (var aff in affiliates)
+        await affiliateRepo.AddAsync(aff);
+
+    // Define drivers with UserUid values matching AuthServer test users
+    var drivers = new[]
+    {
+        // Chicago Limo Service drivers
+        new Driver 
+        { 
+            Id = Guid.NewGuid().ToString("N"), 
+            AffiliateId = affiliates[0].Id, 
+            Name = "Charlie Johnson", 
+            Phone = "312-555-0001", 
+            UserUid = "driver-001"  // Matches AuthServer test user "charlie"
+        },
+        new Driver 
+        { 
+            Id = Guid.NewGuid().ToString("N"), 
+            AffiliateId = affiliates[0].Id, 
+            Name = "Sarah Lee", 
+            Phone = "312-555-0002", 
+            UserUid = "driver-002" 
+        },
+        // Suburban Chauffeurs drivers
+        new Driver 
+        { 
+            Id = Guid.NewGuid().ToString("N"), 
+            AffiliateId = affiliates[1].Id, 
+            Name = "Robert Brown", 
+            Phone = "847-555-1000", 
+            UserUid = "driver-003" 
+        }
+    };
+
+    // Save drivers separately
+    foreach (var driver in drivers)
+        await driverRepo.AddAsync(driver);
+
+    return Results.Ok(new 
+    { 
+        affiliatesAdded = affiliates.Length, 
+        driversAdded = drivers.Length,
+        message = "Affiliates and drivers seeded successfully",
+        note = "Driver 'Charlie Johnson' has UserUid 'driver-001' matching AuthServer test user 'charlie'"
+    });
+})
+.WithName("SeedAffiliates");
 
 // ===================================================================
 // APPLICATION START
