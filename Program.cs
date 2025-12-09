@@ -43,6 +43,10 @@ builder.Services.AddAuthentication(options =>
 })
 .AddJwtBearer(options =>
 {
+    // CRITICAL: Disable default claim type mapping so "role" stays as "role"
+    // instead of being mapped to "http://schemas.microsoft.com/ws/2008/06/identity/claims/role"
+    options.MapInboundClaims = false;
+    
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuer = false,
@@ -51,7 +55,65 @@ builder.Services.AddAuthentication(options =>
         IssuerSigningKey = signingKey,
         ValidateLifetime = true,
         ClockSkew = TimeSpan.Zero,
-        RoleClaimType = "role"
+        RoleClaimType = "role",      // Map "role" claim to roles
+        NameClaimType = "sub"        // Map "sub" claim to username
+    };
+    
+    // Add authentication event handlers for debugging
+    options.Events = new JwtBearerEvents
+    {
+        OnAuthenticationFailed = context =>
+        {
+            Console.WriteLine($"?? Authentication FAILED: {context.Exception.GetType().Name}");
+            Console.WriteLine($"   Message: {context.Exception.Message}");
+            if (context.Exception.InnerException != null)
+            {
+                Console.WriteLine($"   Inner: {context.Exception.InnerException.Message}");
+            }
+            return Task.CompletedTask;
+        },
+        OnTokenValidated = context =>
+        {
+            var claims = context.Principal?.Claims
+                .Select(c => $"{c.Type}={c.Value}")
+                .ToList() ?? new List<string>();
+            
+            Console.WriteLine($"? Token VALIDATED successfully");
+            Console.WriteLine($"   User: {context.Principal?.Identity?.Name ?? "N/A"}");
+            Console.WriteLine($"   Claims: {string.Join(", ", claims)}");
+            Console.WriteLine($"   IsAuthenticated: {context.Principal?.Identity?.IsAuthenticated}");
+            
+            // Check for role claim specifically
+            var roleClaim = context.Principal?.FindFirst("role");
+            if (roleClaim != null)
+            {
+                Console.WriteLine($"   ? Role found: {roleClaim.Value}");
+            }
+            else
+            {
+                Console.WriteLine($"   ??  NO ROLE CLAIM FOUND!");
+            }
+            
+            return Task.CompletedTask;
+        },
+        OnChallenge = context =>
+        {
+            Console.WriteLine($"?? Authentication CHALLENGE");
+            Console.WriteLine($"   Error: {context.Error}");
+            Console.WriteLine($"   ErrorDescription: {context.ErrorDescription}");
+            return Task.CompletedTask;
+        },
+        OnForbidden = context =>
+        {
+            Console.WriteLine($"?? Authorization FORBIDDEN (403)");
+            Console.WriteLine($"   User: {context.Principal?.Identity?.Name ?? "Anonymous"}");
+            Console.WriteLine($"   IsAuthenticated: {context.Principal?.Identity?.IsAuthenticated}");
+            
+            var roles = context.Principal?.FindAll("role").Select(c => c.Value).ToList();
+            Console.WriteLine($"   Roles: {(roles?.Any() == true ? string.Join(", ", roles) : "NONE")}");
+            
+            return Task.CompletedTask;
+        }
     };
 });
 

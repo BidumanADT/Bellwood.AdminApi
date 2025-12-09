@@ -1,30 +1,23 @@
 [
   {
-    "Id": "cb71099f541b4049bf21309c5f912109",
-    "AffiliateId": "2d14bfb2ece54d538a6ffb4a71837e2e",
+    "Id": "61ca261a9621495384d8852d6ec36598",
+    "AffiliateId": "ccfffd6d2cc94186addf09cb8cf45162",
     "Name": "Charlie Johnson",
     "Phone": "312-555-0001",
     "UserUid": "driver-001"
   },
   {
-    "Id": "6fa7cb5ba19b4e55a742026d63611aa9",
-    "AffiliateId": "2d14bfb2ece54d538a6ffb4a71837e2e",
+    "Id": "6372a9a799c147bdbaea9f3d0275ac82",
+    "AffiliateId": "ccfffd6d2cc94186addf09cb8cf45162",
     "Name": "Sarah Lee",
     "Phone": "312-555-0002",
     "UserUid": "driver-002"
   },
   {
-    "Id": "2dbe99ec23ec4c3dbd473b6a90118a68",
-    "AffiliateId": "66468164b4c946a29032a2791e908798",
+    "Id": "89953b4f117f46c99eaf0bf464c7ae6e",
+    "AffiliateId": "c316ccd53c114921b84e933da85fe242",
     "Name": "Robert Brown",
     "Phone": "847-555-1000",
     "UserUid": "driver-003"
-  },
-  {
-    "Id": "27c8663db4b846c884a364af33e89d27",
-    "AffiliateId": "66468164b4c946a29032a2791e908798",
-    "Name": "NewDriver AddTest",
-    "Phone": "312-111-2222",
-    "UserUid": null
   }
 ]
