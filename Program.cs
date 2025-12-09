@@ -309,33 +309,55 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
 
     var samples = new[]
     {
+        // Requested - Initial booking request from passenger app
+        new BookingRecord {
+            CreatedUtc = now.AddMinutes(-10),
+            Status = BookingStatus.Requested,
+            BookerName = "Tom Anderson",
+            PassengerName = "Maria Garcia",
+            VehicleClass = "Sedan",
+            PickupLocation = "Union Station, Chicago",
+            DropoffLocation = "Willis Tower",
+            PickupDateTime = now.AddHours(24),
+            Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
+                Booker = new() { FirstName = "Tom", LastName = "Anderson", PhoneNumber = "312-555-1111", EmailAddress = "tom.anderson@example.com" },
+                Passenger = new() { FirstName = "Maria", LastName = "Garcia", PhoneNumber = "312-555-2222", EmailAddress = "maria.garcia@example.com" },
+                VehicleClass = "Sedan",
+                PickupDateTime = now.AddHours(24),
+                PickupLocation = "Union Station, Chicago",
+                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
+                DropoffLocation = "Willis Tower",
+                PassengerCount = 1, CheckedBags = 1, CarryOnBags = 1
+            }
+        },
+        // Confirmed - Staff approved booking
+        new BookingRecord {
+            CreatedUtc = now.AddMinutes(-20),
+            Status = BookingStatus.Confirmed,
+            BookerName = "James Wilson",
+            PassengerName = "Patricia Brown",
+            VehicleClass = "SUV",
+            PickupLocation = "Navy Pier",
+            DropoffLocation = "Midway Airport",
+            PickupDateTime = now.AddHours(36),
+            Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
+                Booker = new() { FirstName = "James", LastName = "Wilson", PhoneNumber = "312-555-3333", EmailAddress = "james.wilson@example.com" },
+                Passenger = new() { FirstName = "Patricia", LastName = "Brown", PhoneNumber = "312-555-4444", EmailAddress = "patricia.brown@example.com" },
+                VehicleClass = "SUV",
+                PickupDateTime = now.AddHours(36),
+                PickupLocation = "Navy Pier",
+                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
+                DropoffLocation = "Midway Airport",
+                PassengerCount = 3, CheckedBags = 3, CarryOnBags = 2
+            }
+        },
+        // Scheduled - Charlie's first ride (5 hours from now)
         new BookingRecord {
             CreatedUtc = now.AddMinutes(-5),
             Status = BookingStatus.Scheduled,
-            AssignedDriverUid = "driver-001", // Test driver UID
-            CurrentRideStatus = RideStatus.Scheduled,
-            BookerName = "Alice Morgan",
-            PassengerName = "Taylor Reed",
-            VehicleClass = "SUV",
-            PickupLocation = "O'Hare FBO",
-            DropoffLocation = "Downtown Chicago",
-            PickupDateTime = now.AddHours(3),
-            Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
-                Booker = new() { FirstName = "Alice", LastName = "Morgan", PhoneNumber = "312-555-7777", EmailAddress = "alice.morgan@example.com" },
-                Passenger = new() { FirstName = "Taylor", LastName = "Reed", PhoneNumber = "773-555-1122", EmailAddress = "taylor.reed@example.com" },
-                VehicleClass = "SUV",
-                PickupDateTime = now.AddHours(3),
-                PickupLocation = "O'Hare FBO",
-                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.MeetAndGreet,
-                PickupSignText = "REED / Bellwood",
-                DropoffLocation = "Downtown Chicago",
-                PassengerCount = 2, CheckedBags = 2, CarryOnBags = 2
-            }
-        },
-        new BookingRecord {
-            CreatedUtc = now.AddHours(-2),
-            Status = BookingStatus.Scheduled,
-            AssignedDriverUid = "driver-001", // Same driver
+            AssignedDriverId = "TBD-driver-id",
+            AssignedDriverUid = "driver-001", // Charlie
+            AssignedDriverName = "Charlie Johnson",
             CurrentRideStatus = RideStatus.Scheduled,
             BookerName = "Chris Bailey",
             PassengerName = "Jordan Chen",
@@ -344,20 +366,75 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
             DropoffLocation = "Midway Airport",
             PickupDateTime = now.AddHours(5),
             Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
-                Booker = new() { FirstName="Chris", LastName="Bailey" },
-                Passenger = new() { FirstName="Jordan", LastName="Chen" },
+                Booker = new() { FirstName="Chris", LastName="Bailey", PhoneNumber = "312-555-5555", EmailAddress = "chris.bailey@example.com" },
+                Passenger = new() { FirstName="Jordan", LastName="Chen", PhoneNumber = "312-555-6666", EmailAddress = "jordan.chen@example.com" },
                 VehicleClass = "Sedan",
                 PickupDateTime = now.AddHours(5),
                 PickupLocation = "Langham Hotel",
                 PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "Midway Airport",
-                PassengerCount = 1
+                PassengerCount = 1, CheckedBags = 1
             }
         },
+        // Scheduled - Charlie's second ride (48 hours from now)
+        new BookingRecord {
+            CreatedUtc = now.AddMinutes(-3),
+            Status = BookingStatus.Scheduled,
+            AssignedDriverId = "TBD-driver-id",
+            AssignedDriverUid = "driver-001", // Charlie
+            AssignedDriverName = "Charlie Johnson",
+            CurrentRideStatus = RideStatus.Scheduled,
+            BookerName = "David Miller",
+            PassengerName = "Emma Watson",
+            VehicleClass = "S-Class",
+            PickupLocation = "O'Hare FBO",
+            DropoffLocation = "Peninsula Hotel, Chicago",
+            PickupDateTime = now.AddHours(48),
+            Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
+                Booker = new() { FirstName="David", LastName="Miller", PhoneNumber = "312-555-7777", EmailAddress = "david.miller@example.com" },
+                Passenger = new() { FirstName="Emma", LastName="Watson", PhoneNumber = "312-555-8888", EmailAddress = "emma.watson@example.com" },
+                VehicleClass = "S-Class",
+                PickupDateTime = now.AddHours(48),
+                PickupLocation = "O'Hare FBO",
+                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.MeetAndGreet,
+                PickupSignText = "WATSON / Bellwood",
+                DropoffLocation = "Peninsula Hotel, Chicago",
+                PassengerCount = 2, CheckedBags = 2, CarryOnBags = 1
+            }
+        },
+        // InProgress - Driver has picked up passenger
+        new BookingRecord {
+            CreatedUtc = now.AddHours(-1),
+            Status = BookingStatus.InProgress,
+            AssignedDriverId = "TBD-driver-id",
+            AssignedDriverUid = "driver-002", // Sarah
+            AssignedDriverName = "Sarah Lee",
+            CurrentRideStatus = RideStatus.PassengerOnboard,
+            BookerName = "Alice Morgan",
+            PassengerName = "Taylor Reed",
+            VehicleClass = "SUV",
+            PickupLocation = "O'Hare FBO",
+            DropoffLocation = "Downtown Chicago",
+            PickupDateTime = now.AddMinutes(-30),
+            Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
+                Booker = new() { FirstName = "Alice", LastName = "Morgan", PhoneNumber = "312-555-7777", EmailAddress = "alice.morgan@example.com" },
+                Passenger = new() { FirstName = "Taylor", LastName = "Reed", PhoneNumber = "773-555-1122", EmailAddress = "taylor.reed@example.com" },
+                VehicleClass = "SUV",
+                PickupDateTime = now.AddMinutes(-30),
+                PickupLocation = "O'Hare FBO",
+                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.MeetAndGreet,
+                PickupSignText = "REED / Bellwood",
+                DropoffLocation = "Downtown Chicago",
+                PassengerCount = 2, CheckedBags = 2, CarryOnBags = 2
+            }
+        },
+        // Completed - Ride finished successfully
         new BookingRecord {
             CreatedUtc = now.AddDays(-1),
             Status = BookingStatus.Completed,
-            AssignedDriverUid = "driver-002", // Different driver
+            AssignedDriverId = "TBD-driver-id",
+            AssignedDriverUid = "driver-002", // Sarah
+            AssignedDriverName = "Sarah Lee",
             CurrentRideStatus = RideStatus.Completed,
             BookerName = "Lisa Gomez",
             PassengerName = "Derek James",
@@ -366,12 +443,64 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
             DropoffLocation = "Navy Pier",
             PickupDateTime = now.AddDays(-1).AddHours(2),
             Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
-                Booker = new() { FirstName="Lisa", LastName="Gomez" },
-                Passenger = new() { FirstName="Derek", LastName="James" },
+                Booker = new() { FirstName="Lisa", LastName="Gomez", PhoneNumber = "312-555-9999", EmailAddress = "lisa.gomez@example.com" },
+                Passenger = new() { FirstName="Derek", LastName="James", PhoneNumber = "312-555-0000", EmailAddress = "derek.james@example.com" },
                 VehicleClass = "S-Class",
                 PickupDateTime = now.AddDays(-1).AddHours(2),
                 PickupLocation = "O'Hare International",
+                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "Navy Pier",
+                PassengerCount = 2
+            }
+        },
+        // Cancelled - Booking was cancelled
+        new BookingRecord {
+            CreatedUtc = now.AddDays(-2),
+            Status = BookingStatus.Cancelled,
+            CancelledAt = now.AddDays(-2).AddHours(1),
+            AssignedDriverId = "TBD-driver-id",
+            AssignedDriverUid = "driver-003", // Robert
+            AssignedDriverName = "Robert Brown",
+            CurrentRideStatus = RideStatus.Cancelled,
+            BookerName = "Michael Davis",
+            PassengerName = "Jennifer Taylor",
+            VehicleClass = "Sedan",
+            PickupLocation = "Midway Airport",
+            DropoffLocation = "Naperville",
+            PickupDateTime = now.AddDays(-2).AddHours(3),
+            Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
+                Booker = new() { FirstName="Michael", LastName="Davis", PhoneNumber = "847-555-1111", EmailAddress = "michael.davis@example.com" },
+                Passenger = new() { FirstName="Jennifer", LastName="Taylor", PhoneNumber = "847-555-2222", EmailAddress = "jennifer.taylor@example.com" },
+                VehicleClass = "Sedan",
+                PickupDateTime = now.AddDays(-2).AddHours(3),
+                PickupLocation = "Midway Airport",
+                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
+                DropoffLocation = "Naperville",
+                PassengerCount = 1
+            }
+        },
+        // NoShow - Passenger didn't show up
+        new BookingRecord {
+            CreatedUtc = now.AddDays(-3),
+            Status = BookingStatus.NoShow,
+            AssignedDriverId = "TBD-driver-id",
+            AssignedDriverUid = "driver-003", // Robert
+            AssignedDriverName = "Robert Brown",
+            CurrentRideStatus = RideStatus.Cancelled,
+            BookerName = "Robert Martinez",
+            PassengerName = "Susan Clark",
+            VehicleClass = "SUV",
+            PickupLocation = "Union Station",
+            DropoffLocation = "O'Hare Airport",
+            PickupDateTime = now.AddDays(-3).AddHours(2),
+            Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
+                Booker = new() { FirstName="Robert", LastName="Martinez", PhoneNumber = "847-555-3333", EmailAddress = "robert.martinez@example.com" },
+                Passenger = new() { FirstName="Susan", LastName="Clark", PhoneNumber = "847-555-4444", EmailAddress = "susan.clark@example.com" },
+                VehicleClass = "SUV",
+                PickupDateTime = now.AddDays(-3).AddHours(2),
+                PickupLocation = "Union Station",
+                PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
+                DropoffLocation = "O'Hare Airport",
                 PassengerCount = 2
             }
         }
@@ -1045,7 +1174,7 @@ app.MapPost("/dev/seed-affiliates", async (
         { 
             Id = Guid.NewGuid().ToString("N"), 
             AffiliateId = affiliates[0].Id, 
-            Name = "Michael Johnson", 
+            Name = "Charlie Johnson", 
             Phone = "312-555-0001", 
             UserUid = "driver-001"  // Matches AuthServer test user "charlie"
         },
@@ -1077,7 +1206,7 @@ app.MapPost("/dev/seed-affiliates", async (
         affiliatesAdded = affiliates.Length, 
         driversAdded = drivers.Length,
         message = "Affiliates and drivers seeded successfully",
-        note = "Driver 'Michael Johnson' has UserUid 'driver-001' matching AuthServer test user 'charlie'"
+        note = "Driver 'Charlie Johnson' has UserUid 'driver-001' matching AuthServer test user 'charlie'"
     });
 })
 .WithName("SeedAffiliates");
