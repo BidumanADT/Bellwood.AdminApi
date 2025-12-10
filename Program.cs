@@ -2,11 +2,13 @@ using System.Text;
 using System.Text.Json.Serialization;
 using Bellwood.AdminApi.Models;
 using Bellwood.AdminApi.Services;
+using Bellwood.AdminApi.Hubs;
 using BellwoodGlobal.Mobile.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -26,6 +28,15 @@ builder.Services.AddSingleton<IDriverRepository, FileDriverRepository>();
 
 // Location tracking service (in-memory)
 builder.Services.AddSingleton<ILocationService, InMemoryLocationService>();
+
+// SignalR for real-time location updates
+builder.Services.AddSignalR(options =>
+{
+    options.EnableDetailedErrors = builder.Environment.IsDevelopment();
+});
+
+// Background service for broadcasting location updates via SignalR
+builder.Services.AddHostedService<LocationBroadcastService>();
 
 // API documentation
 builder.Services.AddEndpointsApiExplorer();
@@ -59,9 +70,22 @@ builder.Services.AddAuthentication(options =>
         NameClaimType = "sub"        // Map "sub" claim to username
     };
     
-    // Add authentication event handlers for debugging
+    // Add authentication event handlers for debugging and SignalR support
     options.Events = new JwtBearerEvents
     {
+        // Handle SignalR WebSocket authentication (token in query string)
+        OnMessageReceived = context =>
+        {
+            var accessToken = context.Request.Query["access_token"];
+            var path = context.HttpContext.Request.Path;
+            
+            // If the request is for our SignalR hub, extract token from query string
+            if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs/location"))
+            {
+                context.Token = accessToken;
+            }
+            return Task.CompletedTask;
+        },
         OnAuthenticationFailed = context =>
         {
             Console.WriteLine($"?? Authentication FAILED: {context.Exception.GetType().Name}");
@@ -149,6 +173,9 @@ app.UseCors();
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+// Map SignalR hub for real-time location updates
+app.MapHub<LocationHub>("/hubs/location");
 
 if (app.Environment.IsDevelopment())
 {
@@ -804,6 +831,8 @@ app.MapPost("/driver/rides/{id}/status", async (
     [FromBody] RideStatusUpdateRequest request,
     HttpContext context,
     IBookingRepository repo,
+    ILocationService locationService,
+    IHubContext<LocationHub> hubContext,
     ILoggerFactory loggerFactory) =>
 {
     // Finite state machine for ride status transitions
@@ -855,6 +884,15 @@ app.MapPost("/driver/rides/{id}/status", async (
 
     await repo.UpdateStatusAsync(id, booking.Status);
 
+    // Clean up location data and notify clients when ride ends
+    if (request.NewStatus == RideStatus.Completed || request.NewStatus == RideStatus.Cancelled)
+    {
+        locationService.RemoveLocation(id);
+        var reason = request.NewStatus == RideStatus.Completed ? "Ride completed" : "Ride cancelled";
+        await hubContext.NotifyTrackingStoppedAsync(id, reason);
+        log.LogInformation("Location tracking stopped for ride {Id}: {Reason}", id, reason);
+    }
+
     log.LogInformation("Driver {Uid} updated ride {Id} status to {Status}",
         driverUid, id, request.NewStatus);
 
@@ -869,7 +907,7 @@ app.MapPost("/driver/rides/{id}/status", async (
 .RequireAuthorization("DriverOnly");
 
 // POST /driver/location/update - Receive location updates (rate-limited)
-app.MapPost("/driver/location/update", (
+app.MapPost("/driver/location/update", async (
     [FromBody] LocationUpdate update,
     HttpContext context,
     ILocationService locationService,
@@ -879,31 +917,33 @@ app.MapPost("/driver/location/update", (
     var log = loggerFactory.CreateLogger("driver");
     var driverUid = GetDriverUid(context);
     if (string.IsNullOrEmpty(driverUid))
-        return Task.FromResult(Results.Unauthorized());
+        return Results.Unauthorized();
 
     // Verify ride exists and belongs to driver
-    return repo.GetAsync(update.RideId).ContinueWith<IResult>(task =>
+    var booking = await repo.GetAsync(update.RideId);
+    if (booking is null || booking.AssignedDriverUid != driverUid)
+        return Results.NotFound(new { error = "Ride not found" });
+
+    // Only accept updates for active rides
+    var activeStatuses = new[] { RideStatus.OnRoute, RideStatus.Arrived, RideStatus.PassengerOnboard };
+    if (!booking.CurrentRideStatus.HasValue || !activeStatuses.Contains(booking.CurrentRideStatus.Value))
     {
-        var booking = task.Result;
-        if (booking is null || booking.AssignedDriverUid != driverUid)
-            return Results.NotFound(new { error = "Ride not found" });
+        return Results.BadRequest(new { error = "Location tracking not active for this ride" });
+    }
 
-        // Only accept updates for active rides
-        var activeStatuses = new[] { RideStatus.OnRoute, RideStatus.Arrived, RideStatus.PassengerOnboard };
-        if (!booking.CurrentRideStatus.HasValue || !activeStatuses.Contains(booking.CurrentRideStatus.Value))
-        {
-            return Results.BadRequest(new { error = "Location tracking not active for this ride" });
-        }
+    // Try to store location (rate-limited) - SignalR broadcast happens via event
+    if (!locationService.TryUpdateLocation(driverUid, update))
+    {
+        return Results.StatusCode(429); // Too Many Requests
+    }
 
-        // Try to store location (rate-limited)
-        if (!locationService.TryUpdateLocation(driverUid, update))
-        {
-            return Results.StatusCode(429); // Too Many Requests
-        }
+    log.LogDebug("Location updated for ride {RideId} by driver {Uid}: ({Lat}, {Lon}), heading={Heading}, speed={Speed}", 
+        update.RideId, driverUid, update.Latitude, update.Longitude, update.Heading, update.Speed);
 
-        log.LogDebug("Location updated for ride {RideId} by driver {Uid}", update.RideId, driverUid);
-
-        return Results.Ok(new { message = "Location updated" });
+    return Results.Ok(new { 
+        message = "Location updated",
+        rideId = update.RideId,
+        timestamp = DateTime.UtcNow
     });
 })
 .WithName("UpdateDriverLocation")
@@ -923,17 +963,110 @@ app.MapGet("/driver/location/{rideId}", async (
     if (location is null)
         return Results.NotFound(new { message = "No recent location data" });
 
-    return Results.Ok(new
+    return Results.Ok(new LocationResponse
     {
-        rideId = location.RideId,
-        latitude = location.Latitude,
-        longitude = location.Longitude,
-        timestamp = location.Timestamp,
-        ageSeconds = (DateTime.UtcNow - location.Timestamp).TotalSeconds
+        RideId = location.RideId,
+        Latitude = location.Latitude,
+        Longitude = location.Longitude,
+        Timestamp = location.Timestamp,
+        Heading = location.Heading,
+        Speed = location.Speed,
+        Accuracy = location.Accuracy,
+        AgeSeconds = (DateTime.UtcNow - location.Timestamp).TotalSeconds,
+        DriverUid = booking.AssignedDriverUid,
+        DriverName = booking.AssignedDriverName
     });
 })
 .WithName("GetRideLocation")
 .RequireAuthorization(); // Any authenticated user can track
+
+// GET /admin/locations - Get all active driver locations (admin dashboard)
+app.MapGet("/admin/locations", async (
+    ILocationService locationService,
+    IBookingRepository bookingRepo) =>
+{
+    var activeLocations = locationService.GetAllActiveLocations();
+    var result = new List<ActiveRideLocationDto>();
+    
+    foreach (var entry in activeLocations)
+    {
+        var booking = await bookingRepo.GetAsync(entry.Update.RideId);
+        if (booking is null) continue;
+        
+        result.Add(new ActiveRideLocationDto
+        {
+            RideId = entry.Update.RideId,
+            DriverUid = entry.DriverUid,
+            DriverName = booking.AssignedDriverName,
+            PassengerName = booking.PassengerName,
+            PickupLocation = booking.PickupLocation,
+            DropoffLocation = booking.DropoffLocation,
+            CurrentStatus = booking.CurrentRideStatus,
+            Latitude = entry.Update.Latitude,
+            Longitude = entry.Update.Longitude,
+            Timestamp = entry.Update.Timestamp,
+            Heading = entry.Update.Heading,
+            Speed = entry.Update.Speed,
+            AgeSeconds = entry.AgeSeconds
+        });
+    }
+    
+    return Results.Ok(new
+    {
+        count = result.Count,
+        locations = result,
+        timestamp = DateTime.UtcNow
+    });
+})
+.WithName("GetAllActiveLocations")
+.RequireAuthorization(); // TODO: Add admin-only policy when ready
+
+// GET /admin/locations/rides - Get locations for specific ride IDs (batch query)
+app.MapGet("/admin/locations/rides", async (
+    [FromQuery] string rideIds,
+    ILocationService locationService,
+    IBookingRepository bookingRepo) =>
+{
+    if (string.IsNullOrWhiteSpace(rideIds))
+        return Results.BadRequest(new { error = "rideIds query parameter is required" });
+    
+    var ids = rideIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    var entries = locationService.GetLocations(ids);
+    var result = new List<ActiveRideLocationDto>();
+    
+    foreach (var entry in entries)
+    {
+        var booking = await bookingRepo.GetAsync(entry.Update.RideId);
+        if (booking is null) continue;
+        
+        result.Add(new ActiveRideLocationDto
+        {
+            RideId = entry.Update.RideId,
+            DriverUid = entry.DriverUid,
+            DriverName = booking.AssignedDriverName,
+            PassengerName = booking.PassengerName,
+            PickupLocation = booking.PickupLocation,
+            DropoffLocation = booking.DropoffLocation,
+            CurrentStatus = booking.CurrentRideStatus,
+            Latitude = entry.Update.Latitude,
+            Longitude = entry.Update.Longitude,
+            Timestamp = entry.Update.Timestamp,
+            Heading = entry.Update.Heading,
+            Speed = entry.Update.Speed,
+            AgeSeconds = entry.AgeSeconds
+        });
+    }
+    
+    return Results.Ok(new
+    {
+        requested = ids.Length,
+        found = result.Count,
+        locations = result,
+        timestamp = DateTime.UtcNow
+    });
+})
+.WithName("GetRideLocations")
+.RequireAuthorization();
 
 // ===================================================================
 // AFFILIATE & DRIVER MANAGEMENT ENDPOINTS
