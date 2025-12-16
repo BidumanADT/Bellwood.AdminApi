@@ -751,6 +751,53 @@ app.MapPost("/bookings/{id}/cancel", async (
 static string? GetDriverUid(HttpContext context) =>
     context.User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value;
 
+// Helper: Get timezone from request header or fallback to Central (for backward compatibility)
+static TimeZoneInfo GetRequestTimeZone(HttpContext context)
+{
+    // Try to get timezone from header (e.g., "America/New_York", "Europe/London", "Asia/Tokyo")
+    var timezoneHeader = context.Request.Headers["X-Timezone-Id"].FirstOrDefault();
+    
+    if (!string.IsNullOrWhiteSpace(timezoneHeader))
+    {
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById(timezoneHeader);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"?? Invalid timezone ID in header '{timezoneHeader}': {ex.Message}");
+            // Fall through to default
+        }
+    }
+    
+    // Fallback: Try Central Time (for backward compatibility with existing deployments)
+    return GetCentralTimeZone();
+}
+
+// Helper: Get Central Standard Time (Bellwood's original operating timezone)
+static TimeZoneInfo GetCentralTimeZone()
+{
+    try
+    {
+        // Try to get Central Standard Time
+        return TimeZoneInfo.FindSystemTimeZoneById("Central Standard Time");
+    }
+    catch
+    {
+        // Fallback for Linux/Mac (uses IANA timezone IDs)
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
+        }
+        catch
+        {
+            // Last resort: return local timezone (assumes server is in Central)
+            Console.WriteLine("?? Warning: Could not load Central timezone, using server local time");
+            return TimeZoneInfo.Local;
+        }
+    }
+}
+
 // GET /driver/rides/today - Get driver's rides for the next 24 hours
 app.MapGet("/driver/rides/today", async (HttpContext context, IBookingRepository repo) =>
 {
@@ -758,14 +805,21 @@ app.MapGet("/driver/rides/today", async (HttpContext context, IBookingRepository
     if (string.IsNullOrEmpty(driverUid))
         return Results.Unauthorized();
 
-    var now = DateTime.UtcNow;
-    var tomorrow = now.AddHours(24);
+    // WORLDWIDE FIX: Use timezone from request header (driver's device timezone)
+    // Mobile apps should send X-Timezone-Id header (e.g., "America/New_York", "Europe/London")
+    // Falls back to Central Time for backward compatibility
+    var driverTz = GetRequestTimeZone(context);
+    var nowLocal = TimeZoneInfo.ConvertTime(DateTime.UtcNow, driverTz);
+    var tomorrowLocal = nowLocal.AddHours(24);
+    
+    // Log timezone for debugging (remove in production)
+    Console.WriteLine($"?? Driver {driverUid} timezone: {driverTz.Id}, current time: {nowLocal:yyyy-MM-dd HH:mm}");
 
     var allBookings = await repo.ListAsync(200); // Get enough to filter
     var driverRides = allBookings
         .Where(b => b.AssignedDriverUid == driverUid
-                    && b.PickupDateTime >= now
-                    && b.PickupDateTime <= tomorrow
+                    && b.PickupDateTime >= nowLocal
+                    && b.PickupDateTime <= tomorrowLocal
                     && b.CurrentRideStatus != RideStatus.Completed
                     && b.CurrentRideStatus != RideStatus.Cancelled)
         .OrderBy(b => b.PickupDateTime)

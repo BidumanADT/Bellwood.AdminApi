@@ -8,6 +8,7 @@ public sealed class FileBookingRepository : IBookingRepository
 {
     private readonly string _filePath;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private bool _initialized = false;
 
     private static readonly JsonSerializerOptions _opts = new()
     {
@@ -24,11 +25,31 @@ public sealed class FileBookingRepository : IBookingRepository
         var dir = Path.Combine(env.ContentRootPath, "App_Data");
         Directory.CreateDirectory(dir);
         _filePath = Path.Combine(dir, "bookings.json");
-        if (!File.Exists(_filePath)) File.WriteAllText(_filePath, "[]");
+    }
+
+    private async Task EnsureInitializedAsync()
+    {
+        if (_initialized) return;
+        
+        await _gate.WaitAsync();
+        try
+        {
+            // Double-check after acquiring lock
+            if (_initialized) return;
+            
+            if (!File.Exists(_filePath))
+            {
+                await File.WriteAllTextAsync(_filePath, "[]");
+            }
+            
+            _initialized = true;
+        }
+        finally { _gate.Release(); }
     }
 
     public async Task<BookingRecord> AddAsync(BookingRecord rec, CancellationToken ct = default)
     {
+        await EnsureInitializedAsync();
         await _gate.WaitAsync(ct);
         try
         {
@@ -41,13 +62,20 @@ public sealed class FileBookingRepository : IBookingRepository
     }
 
     public async Task<BookingRecord?> GetAsync(string id, CancellationToken ct = default)
-        => (await ReadAllAsync()).FirstOrDefault(x => x.Id == id);
+    {
+        await EnsureInitializedAsync();
+        return (await ReadAllAsync()).FirstOrDefault(x => x.Id == id);
+    }
 
     public async Task<IReadOnlyList<BookingRecord>> ListAsync(int take = 50, CancellationToken ct = default)
-        => (await ReadAllAsync()).Take(take).ToList();
+    {
+        await EnsureInitializedAsync();
+        return (await ReadAllAsync()).Take(take).ToList();
+    }
 
     public async Task UpdateStatusAsync(string id, BookingStatus status, CancellationToken ct = default)
     {
+        await EnsureInitializedAsync();
         await _gate.WaitAsync(ct);
         try
         {
@@ -62,6 +90,7 @@ public sealed class FileBookingRepository : IBookingRepository
 
     public async Task UpdateDriverAssignmentAsync(string bookingId, string? driverId, string? driverUid, string? driverName, CancellationToken ct = default)
     {
+        await EnsureInitializedAsync();
         await _gate.WaitAsync(ct);
         try
         {
@@ -92,6 +121,12 @@ public sealed class FileBookingRepository : IBookingRepository
 
     private async Task<List<BookingRecord>> ReadAllAsync()
     {
+        // Check if file exists before trying to open it
+        if (!File.Exists(_filePath))
+        {
+            return new List<BookingRecord>();
+        }
+        
         using var fs = File.OpenRead(_filePath);
         var list = await JsonSerializer.DeserializeAsync<List<BookingRecord>>(fs, _opts) ?? new();
         return list;
