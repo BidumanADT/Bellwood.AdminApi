@@ -826,7 +826,11 @@ app.MapGet("/driver/rides/today", async (HttpContext context, IBookingRepository
         .Select(b => new DriverRideListItemDto
         {
             Id = b.Id,
-            PickupDateTime = b.PickupDateTime,
+            PickupDateTime = b.PickupDateTime, // Keep for backward compatibility
+            // FIX: Use DateTimeOffset with driver's timezone to prevent 6-hour shift
+            PickupDateTimeOffset = new DateTimeOffset(
+                b.PickupDateTime, 
+                driverTz.GetUtcOffset(b.PickupDateTime)),
             PickupLocation = b.PickupLocation,
             DropoffLocation = b.DropoffLocation,
             PassengerName = b.PassengerName,
@@ -855,10 +859,17 @@ app.MapGet("/driver/rides/{id}", async (string id, HttpContext context, IBooking
     if (booking.AssignedDriverUid != driverUid)
         return Results.Forbid();
 
+    // Get driver's timezone for correct pickup time display
+    var driverTz = GetRequestTimeZone(context);
+
     var detail = new DriverRideDetailDto
     {
         Id = booking.Id,
-        PickupDateTime = booking.PickupDateTime,
+        PickupDateTime = booking.PickupDateTime, // Keep for backward compatibility
+        // FIX: Use DateTimeOffset with driver's timezone
+        PickupDateTimeOffset = new DateTimeOffset(
+            booking.PickupDateTime, 
+            driverTz.GetUtcOffset(booking.PickupDateTime)),
         PickupLocation = booking.PickupLocation,
         PickupStyle = booking.Draft.PickupStyle.ToString(),
         PickupSignText = booking.Draft.PickupSignText,
@@ -929,14 +940,24 @@ app.MapPost("/driver/rides/{id}/status", async (
     booking.CurrentRideStatus = request.NewStatus;
 
     // Sync with BookingStatus
+    BookingStatus newBookingStatus = booking.Status;
     if (request.NewStatus == RideStatus.PassengerOnboard)
-        booking.Status = BookingStatus.InProgress;
+        newBookingStatus = BookingStatus.InProgress;
     else if (request.NewStatus == RideStatus.Completed)
-        booking.Status = BookingStatus.Completed;
+        newBookingStatus = BookingStatus.Completed;
     else if (request.NewStatus == RideStatus.Cancelled)
-        booking.Status = BookingStatus.Cancelled;
+        newBookingStatus = BookingStatus.Cancelled;
 
-    await repo.UpdateStatusAsync(id, booking.Status);
+    // FIX: Use new method that persists BOTH CurrentRideStatus and Status
+    await repo.UpdateRideStatusAsync(id, request.NewStatus, newBookingStatus);
+
+    // Broadcast status change to AdminPortal and passengers via SignalR
+    await hubContext.BroadcastRideStatusChangedAsync(
+        id, 
+        driverUid, 
+        request.NewStatus,
+        booking.AssignedDriverName,
+        booking.PassengerName);
 
     // Clean up location data and notify clients when ride ends
     if (request.NewStatus == RideStatus.Completed || request.NewStatus == RideStatus.Cancelled)
@@ -1003,15 +1024,45 @@ app.MapPost("/driver/location/update", async (
 .WithName("UpdateDriverLocation")
 .RequireAuthorization("DriverOnly");
 
-// GET /driver/location/{rideId} - Get latest location for a ride (admin/passenger use)
+// GET /driver/location/{rideId} - Get latest location for a ride (admin/driver/passenger use)
 app.MapGet("/driver/location/{rideId}", async (
     string rideId,
+    HttpContext context,
     ILocationService locationService,
     IBookingRepository repo) =>
 {
     var booking = await repo.GetAsync(rideId);
     if (booking is null)
         return Results.NotFound();
+
+    // SECURITY FIX: Verify caller has permission to view this ride's location
+    var driverUid = GetDriverUid(context);
+    var userRole = context.User.FindFirst("role")?.Value;
+    
+    // Allow access if:
+    // 1. User is the assigned driver
+    // 2. User is an admin or dispatcher
+    // TODO: 3. User is the passenger (requires PassengerId or BookerEmail verification)
+    bool isAuthorized = false;
+    
+    if (!string.IsNullOrEmpty(driverUid) && driverUid == booking.AssignedDriverUid)
+    {
+        isAuthorized = true; // Driver can see their own ride
+    }
+    else if (userRole == "admin" || userRole == "dispatcher")
+    {
+        isAuthorized = true; // Admins can see all rides
+    }
+    // TODO: Add passenger verification here when booking has PassengerId or BookerEmail
+    // else if (context.User.FindFirst("sub")?.Value == booking.PassengerId) ...
+    
+    if (!isAuthorized)
+    {
+        return Results.Problem(
+            statusCode: 403,
+            title: "Forbidden",
+            detail: "You do not have permission to view this ride's location");
+    }
 
     var location = locationService.GetLatestLocation(rideId);
     if (location is null)
@@ -1032,7 +1083,7 @@ app.MapGet("/driver/location/{rideId}", async (
     });
 })
 .WithName("GetRideLocation")
-.RequireAuthorization(); // Any authenticated user can track
+.RequireAuthorization(); // Authenticated users only, then check permissions
 
 // GET /admin/locations - Get all active driver locations (admin dashboard)
 app.MapGet("/admin/locations", async (

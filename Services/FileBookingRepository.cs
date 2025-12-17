@@ -88,6 +88,25 @@ public sealed class FileBookingRepository : IBookingRepository
         finally { _gate.Release(); }
     }
 
+    public async Task UpdateRideStatusAsync(string id, RideStatus rideStatus, BookingStatus bookingStatus, CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync();
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var list = await ReadAllAsync();
+            var rec = list.FirstOrDefault(x => x.Id == id);
+            if (rec is null) return;
+            
+            // Update BOTH statuses - this is the fix for Issue #1
+            rec.CurrentRideStatus = rideStatus;
+            rec.Status = bookingStatus;
+            
+            await WriteAllAsync(list);
+        }
+        finally { _gate.Release(); }
+    }
+
     public async Task UpdateDriverAssignmentAsync(string bookingId, string? driverId, string? driverUid, string? driverName, CancellationToken ct = default)
     {
         await EnsureInitializedAsync();

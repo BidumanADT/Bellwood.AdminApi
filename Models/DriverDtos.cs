@@ -8,7 +8,20 @@ namespace Bellwood.AdminApi.Models;
 public sealed class DriverRideListItemDto
 {
     public string Id { get; set; } = "";
+    
+    /// <summary>
+    /// DEPRECATED: Use PickupDateTimeOffset instead.
+    /// This property may display incorrect times due to timezone conversion issues.
+    /// </summary>
+    [Obsolete("Use PickupDateTimeOffset instead for correct timezone handling")]
     public DateTime PickupDateTime { get; set; }
+    
+    /// <summary>
+    /// Pickup date/time with timezone information.
+    /// This ensures the time is displayed correctly in the driver's local timezone.
+    /// </summary>
+    public DateTimeOffset PickupDateTimeOffset { get; set; }
+    
     public string PickupLocation { get; set; } = "";
     public string? DropoffLocation { get; set; }
     public string PassengerName { get; set; } = "";
@@ -22,7 +35,19 @@ public sealed class DriverRideListItemDto
 public sealed class DriverRideDetailDto
 {
     public string Id { get; set; } = "";
+    
+    /// <summary>
+    /// DEPRECATED: Use PickupDateTimeOffset instead.
+    /// This property may display incorrect times due to timezone conversion issues.
+    /// </summary>
+    [Obsolete("Use PickupDateTimeOffset instead for correct timezone handling")]
     public DateTime PickupDateTime { get; set; }
+    
+    /// <summary>
+    /// Pickup date/time with timezone information.
+    /// </summary>
+    public DateTimeOffset PickupDateTimeOffset { get; set; }
+    
     public string PickupLocation { get; set; } = "";
     public string PickupStyle { get; set; } = "Curbside";
     public string? PickupSignText { get; set; }

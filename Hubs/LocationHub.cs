@@ -177,4 +177,36 @@ public static class LocationHubExtensions
         await hubContext.Clients.Group($"ride_{rideId}").SendAsync("TrackingStopped", payload);
         await hubContext.Clients.Group("admin").SendAsync("TrackingStopped", payload);
     }
+    
+    /// <summary>
+    /// Broadcast ride status change to AdminPortal and passengers.
+    /// NEW: Enables real-time status updates in AdminPortal.
+    /// </summary>
+    public static async Task BroadcastRideStatusChangedAsync(
+        this IHubContext<LocationHub> hubContext,
+        string rideId,
+        string driverUid,
+        RideStatus newStatus,
+        string? driverName = null,
+        string? passengerName = null)
+    {
+        var payload = new
+        {
+            rideId,
+            driverUid,
+            driverName,
+            passengerName,
+            newStatus = newStatus.ToString(),
+            timestamp = DateTime.UtcNow
+        };
+        
+        // Send to passengers tracking this specific ride
+        await hubContext.Clients.Group($"ride_{rideId}").SendAsync("RideStatusChanged", payload);
+        
+        // Send to admins tracking this specific driver
+        await hubContext.Clients.Group($"driver_{driverUid}").SendAsync("RideStatusChanged", payload);
+        
+        // Send to all admins (AdminPortal listens here)
+        await hubContext.Clients.Group("admin").SendAsync("RideStatusChanged", payload);
+    }
 }
