@@ -823,19 +823,35 @@ app.MapGet("/driver/rides/today", async (HttpContext context, IBookingRepository
                     && b.CurrentRideStatus != RideStatus.Completed
                     && b.CurrentRideStatus != RideStatus.Cancelled)
         .OrderBy(b => b.PickupDateTime)
-        .Select(b => new DriverRideListItemDto
+        .Select(b =>
         {
-            Id = b.Id,
-            PickupDateTime = b.PickupDateTime, // Keep for backward compatibility
-            // FIX: Use DateTimeOffset with driver's timezone to prevent 6-hour shift
-            PickupDateTimeOffset = new DateTimeOffset(
-                b.PickupDateTime, 
-                driverTz.GetUtcOffset(b.PickupDateTime)),
-            PickupLocation = b.PickupLocation,
-            DropoffLocation = b.DropoffLocation,
-            PassengerName = b.PassengerName,
-            PassengerPhone = b.Draft.Passenger?.PhoneNumber ?? "N/A",
-            Status = b.CurrentRideStatus ?? RideStatus.Scheduled
+            // FIX: Handle both UTC and Unspecified DateTime.Kind
+            // Seed data has Kind=Utc, mobile app data has Kind=Unspecified
+            DateTimeOffset pickupOffset;
+            
+            if (b.PickupDateTime.Kind == DateTimeKind.Utc)
+            {
+                // Convert UTC to driver's local timezone first, then create offset
+                var pickupLocal = TimeZoneInfo.ConvertTimeFromUtc(b.PickupDateTime, driverTz);
+                pickupOffset = new DateTimeOffset(pickupLocal, driverTz.GetUtcOffset(pickupLocal));
+            }
+            else
+            {
+                // Unspecified or Local - treat as already in correct timezone
+                pickupOffset = new DateTimeOffset(b.PickupDateTime, driverTz.GetUtcOffset(b.PickupDateTime));
+            }
+            
+            return new DriverRideListItemDto
+            {
+                Id = b.Id,
+                PickupDateTime = b.PickupDateTime, // Keep for backward compatibility
+                PickupDateTimeOffset = pickupOffset,
+                PickupLocation = b.PickupLocation,
+                DropoffLocation = b.DropoffLocation,
+                PassengerName = b.PassengerName,
+                PassengerPhone = b.Draft.Passenger?.PhoneNumber ?? "N/A",
+                Status = b.CurrentRideStatus ?? RideStatus.Scheduled
+            };
         })
         .ToList();
 
@@ -861,15 +877,26 @@ app.MapGet("/driver/rides/{id}", async (string id, HttpContext context, IBooking
 
     // Get driver's timezone for correct pickup time display
     var driverTz = GetRequestTimeZone(context);
+    
+    // FIX: Handle both UTC and Unspecified DateTime.Kind
+    DateTimeOffset pickupOffset;
+    if (booking.PickupDateTime.Kind == DateTimeKind.Utc)
+    {
+        // Convert UTC to driver's local timezone first
+        var pickupLocal = TimeZoneInfo.ConvertTimeFromUtc(booking.PickupDateTime, driverTz);
+        pickupOffset = new DateTimeOffset(pickupLocal, driverTz.GetUtcOffset(pickupLocal));
+    }
+    else
+    {
+        // Unspecified or Local - treat as already in correct timezone
+        pickupOffset = new DateTimeOffset(booking.PickupDateTime, driverTz.GetUtcOffset(booking.PickupDateTime));
+    }
 
     var detail = new DriverRideDetailDto
     {
         Id = booking.Id,
         PickupDateTime = booking.PickupDateTime, // Keep for backward compatibility
-        // FIX: Use DateTimeOffset with driver's timezone
-        PickupDateTimeOffset = new DateTimeOffset(
-            booking.PickupDateTime, 
-            driverTz.GetUtcOffset(booking.PickupDateTime)),
+        PickupDateTimeOffset = pickupOffset,
         PickupLocation = booking.PickupLocation,
         PickupStyle = booking.Draft.PickupStyle.ToString(),
         PickupSignText = booking.Draft.PickupSignText,
