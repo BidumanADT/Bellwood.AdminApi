@@ -998,11 +998,14 @@ app.MapPost("/driver/rides/{id}/status", async (
     log.LogInformation("Driver {Uid} updated ride {Id} status to {Status}",
         driverUid, id, request.NewStatus);
 
+    // Updated response contract for Phase 2
     return Results.Ok(new
     {
-        message = "Status updated successfully",
+        success = true,
         rideId = id,
-        newStatus = request.NewStatus.ToString()
+        newStatus = request.NewStatus.ToString(),
+        bookingStatus = newBookingStatus.ToString(),
+        timestamp = DateTime.UtcNow
     });
 })
 .WithName("UpdateRideStatus")
