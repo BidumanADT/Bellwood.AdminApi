@@ -1,7 +1,7 @@
 [
   {
-    "Id": "cb5df160e89141a491684afe860505e7",
-    "CreatedUtc": "2025-12-17T14:59:11.4037054Z",
+    "Id": "525a235bac054091a0955fcd4195e940",
+    "CreatedUtc": "2025-12-17T17:05:17.2088965Z",
     "Status": "NoShow",
     "CancelledAt": null,
     "AssignedDriverId": "TBD-driver-id",
@@ -13,7 +13,7 @@
     "VehicleClass": "SUV",
     "PickupLocation": "Union Station",
     "DropoffLocation": "O\u0027Hare Airport",
-    "PickupDateTime": "2025-12-17T16:59:11.4037054Z",
+    "PickupDateTime": "2025-12-17T19:05:17.2088965Z",
     "Draft": {
       "Booker": {
         "FirstName": "Robert",
@@ -29,7 +29,7 @@
       },
       "AdditionalPassengers": [],
       "VehicleClass": "SUV",
-      "PickupDateTime": "2025-12-17T16:59:11.4037054Z",
+      "PickupDateTime": "2025-12-17T19:05:17.2088965Z",
       "PickupLocation": "Union Station",
       "PickupStyle": "Curbside",
       "PickupSignText": null,
@@ -59,10 +59,10 @@
     }
   },
   {
-    "Id": "179b35330a804b61a36cecda274bba60",
-    "CreatedUtc": "2025-12-18T14:59:11.4037054Z",
+    "Id": "3e7b94a29304447fa8fb0b47cdd689e9",
+    "CreatedUtc": "2025-12-18T17:05:17.2088965Z",
     "Status": "Cancelled",
-    "CancelledAt": "2025-12-18T15:59:11.4037054Z",
+    "CancelledAt": "2025-12-18T18:05:17.2088965Z",
     "AssignedDriverId": "TBD-driver-id",
     "AssignedDriverUid": "driver-003",
     "AssignedDriverName": "Robert Brown",
@@ -72,7 +72,7 @@
     "VehicleClass": "Sedan",
     "PickupLocation": "Midway Airport",
     "DropoffLocation": "Naperville",
-    "PickupDateTime": "2025-12-18T17:59:11.4037054Z",
+    "PickupDateTime": "2025-12-18T20:05:17.2088965Z",
     "Draft": {
       "Booker": {
         "FirstName": "Michael",
@@ -88,7 +88,7 @@
       },
       "AdditionalPassengers": [],
       "VehicleClass": "Sedan",
-      "PickupDateTime": "2025-12-18T17:59:11.4037054Z",
+      "PickupDateTime": "2025-12-18T20:05:17.2088965Z",
       "PickupLocation": "Midway Airport",
       "PickupStyle": "Curbside",
       "PickupSignText": null,
@@ -118,8 +118,8 @@
     }
   },
   {
-    "Id": "9fa7b98fa9624ffb86daa75714670fdd",
-    "CreatedUtc": "2025-12-19T14:59:11.4037054Z",
+    "Id": "5859b59617294017b327749529f0a380",
+    "CreatedUtc": "2025-12-19T17:05:17.2088965Z",
     "Status": "Completed",
     "CancelledAt": null,
     "AssignedDriverId": "TBD-driver-id",
@@ -131,7 +131,7 @@
     "VehicleClass": "S-Class",
     "PickupLocation": "O\u0027Hare International",
     "DropoffLocation": "Navy Pier",
-    "PickupDateTime": "2025-12-19T16:59:11.4037054Z",
+    "PickupDateTime": "2025-12-19T19:05:17.2088965Z",
     "Draft": {
       "Booker": {
         "FirstName": "Lisa",
@@ -147,7 +147,7 @@
       },
       "AdditionalPassengers": [],
       "VehicleClass": "S-Class",
-      "PickupDateTime": "2025-12-19T16:59:11.4037054Z",
+      "PickupDateTime": "2025-12-19T19:05:17.2088965Z",
       "PickupLocation": "O\u0027Hare International",
       "PickupStyle": "Curbside",
       "PickupSignText": null,
@@ -177,8 +177,8 @@
     }
   },
   {
-    "Id": "d11b71fdb30b4d02a2b923f3793bbce3",
-    "CreatedUtc": "2025-12-20T13:59:11.4037054Z",
+    "Id": "a8d8f8e303dc40d19e34adc5ee9ec608",
+    "CreatedUtc": "2025-12-20T16:05:17.2088965Z",
     "Status": "InProgress",
     "CancelledAt": null,
     "AssignedDriverId": "TBD-driver-id",
@@ -190,7 +190,7 @@
     "VehicleClass": "SUV",
     "PickupLocation": "O\u0027Hare FBO",
     "DropoffLocation": "Downtown Chicago",
-    "PickupDateTime": "2025-12-20T14:29:11.4037054Z",
+    "PickupDateTime": "2025-12-20T16:35:17.2088965Z",
     "Draft": {
       "Booker": {
         "FirstName": "Alice",
@@ -206,7 +206,7 @@
       },
       "AdditionalPassengers": [],
       "VehicleClass": "SUV",
-      "PickupDateTime": "2025-12-20T14:29:11.4037054Z",
+      "PickupDateTime": "2025-12-20T16:35:17.2088965Z",
       "PickupLocation": "O\u0027Hare FBO",
       "PickupStyle": "MeetAndGreet",
       "PickupSignText": "REED / Bellwood",
@@ -236,8 +236,8 @@
     }
   },
   {
-    "Id": "a9b64610e7c44e8ba971dde182356827",
-    "CreatedUtc": "2025-12-20T14:56:11.4037054Z",
+    "Id": "baff85c0623a45a8a85ab332b620f5a7",
+    "CreatedUtc": "2025-12-20T17:02:17.2088965Z",
     "Status": "Scheduled",
     "CancelledAt": null,
     "AssignedDriverId": "TBD-driver-id",
@@ -249,7 +249,7 @@
     "VehicleClass": "S-Class",
     "PickupLocation": "O\u0027Hare FBO",
     "DropoffLocation": "Peninsula Hotel, Chicago",
-    "PickupDateTime": "2025-12-22T14:59:11.4037054Z",
+    "PickupDateTime": "2025-12-22T17:05:17.2088965Z",
     "Draft": {
       "Booker": {
         "FirstName": "David",
@@ -265,7 +265,7 @@
       },
       "AdditionalPassengers": [],
       "VehicleClass": "S-Class",
-      "PickupDateTime": "2025-12-22T14:59:11.4037054Z",
+      "PickupDateTime": "2025-12-22T17:05:17.2088965Z",
       "PickupLocation": "O\u0027Hare FBO",
       "PickupStyle": "MeetAndGreet",
       "PickupSignText": "WATSON / Bellwood",
@@ -295,20 +295,20 @@
     }
   },
   {
-    "Id": "467a826a844648efb7197ff30e0af452",
-    "CreatedUtc": "2025-12-20T14:54:11.4037054Z",
+    "Id": "6cec3610a8454379bddf0c9fa63444a9",
+    "CreatedUtc": "2025-12-20T17:00:17.2088965Z",
     "Status": "Scheduled",
     "CancelledAt": null,
     "AssignedDriverId": "TBD-driver-id",
     "AssignedDriverUid": "driver-001",
     "AssignedDriverName": "Charlie Johnson",
-    "CurrentRideStatus": "Scheduled",
+    "CurrentRideStatus": "OnRoute",
     "BookerName": "Chris Bailey",
     "PassengerName": "Jordan Chen",
     "VehicleClass": "Sedan",
     "PickupLocation": "Langham Hotel",
     "DropoffLocation": "Midway Airport",
-    "PickupDateTime": "2025-12-20T19:59:11.4037054Z",
+    "PickupDateTime": "2025-12-20T22:05:17.2088965Z",
     "Draft": {
       "Booker": {
         "FirstName": "Chris",
@@ -324,7 +324,7 @@
       },
       "AdditionalPassengers": [],
       "VehicleClass": "Sedan",
-      "PickupDateTime": "2025-12-20T19:59:11.4037054Z",
+      "PickupDateTime": "2025-12-20T22:05:17.2088965Z",
       "PickupLocation": "Langham Hotel",
       "PickupStyle": "Curbside",
       "PickupSignText": null,
@@ -354,8 +354,8 @@
     }
   },
   {
-    "Id": "6bbe4855f149461da0afbe93c683ffea",
-    "CreatedUtc": "2025-12-20T14:39:11.4037054Z",
+    "Id": "ae47c369fa704f3491dad94364b0ddab",
+    "CreatedUtc": "2025-12-20T16:45:17.2088965Z",
     "Status": "Confirmed",
     "CancelledAt": null,
     "AssignedDriverId": null,
@@ -367,7 +367,7 @@
     "VehicleClass": "SUV",
     "PickupLocation": "Navy Pier",
     "DropoffLocation": "Midway Airport",
-    "PickupDateTime": "2025-12-22T02:59:11.4037054Z",
+    "PickupDateTime": "2025-12-22T05:05:17.2088965Z",
     "Draft": {
       "Booker": {
         "FirstName": "James",
@@ -383,7 +383,7 @@
       },
       "AdditionalPassengers": [],
       "VehicleClass": "SUV",
-      "PickupDateTime": "2025-12-22T02:59:11.4037054Z",
+      "PickupDateTime": "2025-12-22T05:05:17.2088965Z",
       "PickupLocation": "Navy Pier",
       "PickupStyle": "Curbside",
       "PickupSignText": null,
@@ -413,8 +413,8 @@
     }
   },
   {
-    "Id": "d2924ffd461043af800611df5d93551a",
-    "CreatedUtc": "2025-12-20T14:49:11.4037054Z",
+    "Id": "62b43a2e8a0d4f89ad313927e4577928",
+    "CreatedUtc": "2025-12-20T16:55:17.2088965Z",
     "Status": "Requested",
     "CancelledAt": null,
     "AssignedDriverId": null,
@@ -426,7 +426,7 @@
     "VehicleClass": "Sedan",
     "PickupLocation": "Union Station, Chicago",
     "DropoffLocation": "Willis Tower",
-    "PickupDateTime": "2025-12-21T14:59:11.4037054Z",
+    "PickupDateTime": "2025-12-21T17:05:17.2088965Z",
     "Draft": {
       "Booker": {
         "FirstName": "Tom",
@@ -442,7 +442,7 @@
       },
       "AdditionalPassengers": [],
       "VehicleClass": "Sedan",
-      "PickupDateTime": "2025-12-21T14:59:11.4037054Z",
+      "PickupDateTime": "2025-12-21T17:05:17.2088965Z",
       "PickupLocation": "Union Station, Chicago",
       "PickupStyle": "Curbside",
       "PickupSignText": null,

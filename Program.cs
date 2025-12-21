@@ -646,24 +646,49 @@ app.MapPost("/bookings", async (
 .RequireAuthorization();
 
 // GET /bookings/list - List recent bookings (paginated)
-app.MapGet("/bookings/list", async ([FromQuery] int take, IBookingRepository repo) =>
+app.MapGet("/bookings/list", async ([FromQuery] int take, HttpContext context, IBookingRepository repo) =>
 {
     take = (take <= 0 || take > 200) ? 50 : take;
     var rows = await repo.ListAsync(take);
+    
+    // Get user's timezone for PickupDateTimeOffset conversion
+    // Default to Central Time for admin users who don't send X-Timezone-Id header
+    var userTz = GetRequestTimeZone(context);
 
-    var list = rows.Select(r => new {
-        r.Id,
-        r.CreatedUtc,
-        Status = r.Status.ToString(),
-        r.BookerName,
-        r.PassengerName,
-        r.VehicleClass,
-        r.PickupLocation,
-        r.DropoffLocation,
-        r.PickupDateTime,
-        AssignedDriverId = r.AssignedDriverId,
-        AssignedDriverUid = r.AssignedDriverUid,
-        AssignedDriverName = r.AssignedDriverName ?? "Unassigned"
+    var list = rows.Select(r =>
+    {
+        // FIX: Handle DateTime.Kind for PickupDateTimeOffset
+        DateTimeOffset pickupOffset;
+        if (r.PickupDateTime.Kind == DateTimeKind.Utc)
+        {
+            var pickupLocal = TimeZoneInfo.ConvertTimeFromUtc(r.PickupDateTime, userTz);
+            pickupOffset = new DateTimeOffset(pickupLocal, userTz.GetUtcOffset(pickupLocal));
+        }
+        else
+        {
+            pickupOffset = new DateTimeOffset(r.PickupDateTime, userTz.GetUtcOffset(r.PickupDateTime));
+        }
+        
+        return new
+        {
+            r.Id,
+            r.CreatedUtc,
+            Status = r.Status.ToString(),
+            // FIX: Include CurrentRideStatus for real-time driver progress
+            CurrentRideStatus = r.CurrentRideStatus?.ToString(),
+            r.BookerName,
+            r.PassengerName,
+            r.VehicleClass,
+            r.PickupLocation,
+            r.DropoffLocation,
+            // Keep old property for backward compatibility
+            r.PickupDateTime,
+            // FIX: Add PickupDateTimeOffset for correct timezone display
+            PickupDateTimeOffset = pickupOffset,
+            AssignedDriverId = r.AssignedDriverId,
+            AssignedDriverUid = r.AssignedDriverUid,
+            AssignedDriverName = r.AssignedDriverName ?? "Unassigned"
+        };
     });
 
     return Results.Ok(list);
@@ -672,22 +697,42 @@ app.MapGet("/bookings/list", async ([FromQuery] int take, IBookingRepository rep
 .RequireAuthorization();
 
 // GET /bookings/{id} - Get detailed booking by ID
-app.MapGet("/bookings/{id}", async (string id, IBookingRepository repo) =>
+app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepository repo) =>
 {
     var rec = await repo.GetAsync(id);
     if (rec is null) return Results.NotFound();
+    
+    // Get user's timezone for PickupDateTimeOffset conversion
+    var userTz = GetRequestTimeZone(context);
+    
+    // Handle DateTime.Kind for PickupDateTimeOffset
+    DateTimeOffset pickupOffset;
+    if (rec.PickupDateTime.Kind == DateTimeKind.Utc)
+    {
+        var pickupLocal = TimeZoneInfo.ConvertTimeFromUtc(rec.PickupDateTime, userTz);
+        pickupOffset = new DateTimeOffset(pickupLocal, userTz.GetUtcOffset(pickupLocal));
+    }
+    else
+    {
+        pickupOffset = new DateTimeOffset(rec.PickupDateTime, userTz.GetUtcOffset(rec.PickupDateTime));
+    }
 
     return Results.Ok(new
     {
         rec.Id,
         rec.CreatedUtc,
         Status = rec.Status.ToString(),
+        // FIX: Include CurrentRideStatus for real-time driver progress
+        CurrentRideStatus = rec.CurrentRideStatus?.ToString(),
         rec.BookerName,
         rec.PassengerName,
         rec.VehicleClass,
         rec.PickupLocation,
         rec.DropoffLocation,
+        // Keep old property for backward compatibility
         rec.PickupDateTime,
+        // FIX: Add PickupDateTimeOffset for correct timezone display
+        PickupDateTimeOffset = pickupOffset,
         rec.Draft,
         AssignedDriverId = rec.AssignedDriverId,
         AssignedDriverUid = rec.AssignedDriverUid,
