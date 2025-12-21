@@ -1113,11 +1113,12 @@ app.MapGet("/driver/location/{rideId}", async (
     // SECURITY FIX: Verify caller has permission to view this ride's location
     var driverUid = GetDriverUid(context);
     var userRole = context.User.FindFirst("role")?.Value;
+    var userSub = context.User.FindFirst("sub")?.Value;
     
     // Allow access if:
     // 1. User is the assigned driver
     // 2. User is an admin or dispatcher
-    // TODO: 3. User is the passenger (requires PassengerId or BookerEmail verification)
+    // 3. User is authenticated but has no role (backward compatibility for AdminPortal)
     bool isAuthorized = false;
     
     if (!string.IsNullOrEmpty(driverUid) && driverUid == booking.AssignedDriverUid)
@@ -1128,8 +1129,13 @@ app.MapGet("/driver/location/{rideId}", async (
     {
         isAuthorized = true; // Admins can see all rides
     }
-    // TODO: Add passenger verification here when booking has PassengerId or BookerEmail
-    // else if (context.User.FindFirst("sub")?.Value == booking.PassengerId) ...
+    else if (string.IsNullOrEmpty(userRole) && context.User.Identity?.IsAuthenticated == true)
+    {
+        // FIX: AdminPortal users don't have role claim yet
+        // Allow authenticated users without roles (backward compatibility)
+        // TODO: Remove this once AdminPortal users have proper role claims
+        isAuthorized = true;
+    }
     
     if (!isAuthorized)
     {
@@ -1235,6 +1241,94 @@ app.MapGet("/passenger/rides/{rideId}/location", async (
 })
 .WithName("GetPassengerRideLocation")
 .RequireAuthorization(); // Passengers authenticate via PassengerApp
+
+// GET /admin/locations - Get all active driver locations (admin dashboard)
+app.MapGet("/admin/locations", async (
+    ILocationService locationService,
+    IBookingRepository bookingRepo) =>
+{
+    var activeLocations = locationService.GetAllActiveLocations();
+    var result = new List<ActiveRideLocationDto>();
+    
+    foreach (var entry in activeLocations)
+    {
+        var booking = await bookingRepo.GetAsync(entry.Update.RideId);
+        if (booking is null) continue;
+        
+        result.Add(new ActiveRideLocationDto
+        {
+            RideId = entry.Update.RideId,
+            DriverUid = entry.DriverUid,
+            DriverName = booking.AssignedDriverName,
+            PassengerName = booking.PassengerName,
+            PickupLocation = booking.PickupLocation,
+            DropoffLocation = booking.DropoffLocation,
+            CurrentStatus = booking.CurrentRideStatus,
+            Latitude = entry.Update.Latitude,
+            Longitude = entry.Update.Longitude,
+            Timestamp = entry.Update.Timestamp,
+            Heading = entry.Update.Heading,
+            Speed = entry.Update.Speed,
+            AgeSeconds = entry.AgeSeconds
+        });
+    }
+    
+    return Results.Ok(new
+    {
+        count = result.Count,
+        locations = result,
+        timestamp = DateTime.UtcNow
+    });
+})
+.WithName("GetAllActiveLocations")
+.RequireAuthorization(); // TODO: Add admin-only policy when ready
+
+// GET /admin/locations/rides - Get locations for specific ride IDs (batch query)
+app.MapGet("/admin/locations/rides", async (
+    [FromQuery] string rideIds,
+    ILocationService locationService,
+    IBookingRepository bookingRepo) =>
+{
+    if (string.IsNullOrWhiteSpace(rideIds))
+        return Results.BadRequest(new { error = "rideIds query parameter is required" });
+    
+    var ids = rideIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    var entries = locationService.GetLocations(ids);
+    var result = new List<ActiveRideLocationDto>();
+    
+    foreach (var entry in entries)
+    {
+        var booking = await bookingRepo.GetAsync(entry.Update.RideId);
+        if (booking is null) continue;
+        
+        result.Add(new ActiveRideLocationDto
+        {
+            RideId = entry.Update.RideId,
+            DriverUid = entry.DriverUid,
+            DriverName = booking.AssignedDriverName,
+            PassengerName = booking.PassengerName,
+            PickupLocation = booking.PickupLocation,
+            DropoffLocation = booking.DropoffLocation,
+            CurrentStatus = booking.CurrentRideStatus,
+            Latitude = entry.Update.Latitude,
+            Longitude = entry.Update.Longitude,
+            Timestamp = entry.Update.Timestamp,
+            Heading = entry.Update.Heading,
+            Speed = entry.Update.Speed,
+            AgeSeconds = entry.AgeSeconds
+        });
+    }
+    
+    return Results.Ok(new
+    {
+        requested = ids.Length,
+        found = result.Count,
+        locations = result,
+        timestamp = DateTime.UtcNow
+    });
+})
+.WithName("GetRideLocations")
+.RequireAuthorization();
 
 // ===================================================================
 // AFFILIATE & DRIVER MANAGEMENT ENDPOINTS

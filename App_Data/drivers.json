@@ -1,0 +1,23 @@
+[
+  {
+    "Id": "e73e594df4884aafb83264dd8b801aa5",
+    "AffiliateId": "8052ad6bc6494b0ca5ad21ae127a7809",
+    "Name": "Charlie Johnson",
+    "Phone": "312-555-0001",
+    "UserUid": "driver-001"
+  },
+  {
+    "Id": "b6acb3a8322544f0bd40acebe7e6b8af",
+    "AffiliateId": "8052ad6bc6494b0ca5ad21ae127a7809",
+    "Name": "Sarah Lee",
+    "Phone": "312-555-0002",
+    "UserUid": "driver-002"
+  },
+  {
+    "Id": "91155c99684f4e82af7266847eedd558",
+    "AffiliateId": "2a303b2f50234265b52057c7c3014efa",
+    "Name": "Robert Brown",
+    "Phone": "847-555-1000",
+    "UserUid": "driver-003"
+  }
+]
