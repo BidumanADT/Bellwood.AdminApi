@@ -1160,93 +1160,81 @@ app.MapGet("/driver/location/{rideId}", async (
 .WithName("GetRideLocation")
 .RequireAuthorization(); // Authenticated users only, then check permissions
 
-// GET /admin/locations - Get all active driver locations (admin dashboard)
-app.MapGet("/admin/locations", async (
+// GET /passenger/rides/{rideId}/location - Get location for passenger's own ride
+app.MapGet("/passenger/rides/{rideId}/location", async (
+    string rideId,
+    HttpContext context,
     ILocationService locationService,
-    IBookingRepository bookingRepo) =>
+    IBookingRepository repo) =>
 {
-    var activeLocations = locationService.GetAllActiveLocations();
-    var result = new List<ActiveRideLocationDto>();
-    
-    foreach (var entry in activeLocations)
-    {
-        var booking = await bookingRepo.GetAsync(entry.Update.RideId);
-        if (booking is null) continue;
-        
-        result.Add(new ActiveRideLocationDto
-        {
-            RideId = entry.Update.RideId,
-            DriverUid = entry.DriverUid,
-            DriverName = booking.AssignedDriverName,
-            PassengerName = booking.PassengerName,
-            PickupLocation = booking.PickupLocation,
-            DropoffLocation = booking.DropoffLocation,
-            CurrentStatus = booking.CurrentRideStatus,
-            Latitude = entry.Update.Latitude,
-            Longitude = entry.Update.Longitude,
-            Timestamp = entry.Update.Timestamp,
-            Heading = entry.Update.Heading,
-            Speed = entry.Update.Speed,
-            AgeSeconds = entry.AgeSeconds
-        });
-    }
-    
-    return Results.Ok(new
-    {
-        count = result.Count,
-        locations = result,
-        timestamp = DateTime.UtcNow
-    });
-})
-.WithName("GetAllActiveLocations")
-.RequireAuthorization(); // TODO: Add admin-only policy when ready
+    var booking = await repo.GetAsync(rideId);
+    if (booking is null)
+        return Results.NotFound(new { error = "Ride not found" });
 
-// GET /admin/locations/rides - Get locations for specific ride IDs (batch query)
-app.MapGet("/admin/locations/rides", async (
-    [FromQuery] string rideIds,
-    ILocationService locationService,
-    IBookingRepository bookingRepo) =>
-{
-    if (string.IsNullOrWhiteSpace(rideIds))
-        return Results.BadRequest(new { error = "rideIds query parameter is required" });
+    // PASSENGER AUTHORIZATION: Verify caller owns this booking
+    // Check if user's email or sub claim matches the booker/passenger email
+    var userSub = context.User.FindFirst("sub")?.Value;
+    var userEmail = context.User.FindFirst("email")?.Value;
     
-    var ids = rideIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-    var entries = locationService.GetLocations(ids);
-    var result = new List<ActiveRideLocationDto>();
+    bool isPassengerAuthorized = false;
     
-    foreach (var entry in entries)
+    // Check booker email
+    if (!string.IsNullOrEmpty(userEmail) && 
+        !string.IsNullOrEmpty(booking.Draft?.Booker?.EmailAddress) &&
+        userEmail.Equals(booking.Draft.Booker.EmailAddress, StringComparison.OrdinalIgnoreCase))
     {
-        var booking = await bookingRepo.GetAsync(entry.Update.RideId);
-        if (booking is null) continue;
-        
-        result.Add(new ActiveRideLocationDto
-        {
-            RideId = entry.Update.RideId,
-            DriverUid = entry.DriverUid,
-            DriverName = booking.AssignedDriverName,
-            PassengerName = booking.PassengerName,
-            PickupLocation = booking.PickupLocation,
-            DropoffLocation = booking.DropoffLocation,
-            CurrentStatus = booking.CurrentRideStatus,
-            Latitude = entry.Update.Latitude,
-            Longitude = entry.Update.Longitude,
-            Timestamp = entry.Update.Timestamp,
-            Heading = entry.Update.Heading,
-            Speed = entry.Update.Speed,
-            AgeSeconds = entry.AgeSeconds
-        });
+        isPassengerAuthorized = true;
     }
     
-    return Results.Ok(new
+    // Check passenger email (if different from booker)
+    if (!isPassengerAuthorized && 
+        !string.IsNullOrEmpty(userEmail) &&
+        !string.IsNullOrEmpty(booking.Draft?.Passenger?.EmailAddress) &&
+        userEmail.Equals(booking.Draft.Passenger.EmailAddress, StringComparison.OrdinalIgnoreCase))
     {
-        requested = ids.Length,
-        found = result.Count,
-        locations = result,
-        timestamp = DateTime.UtcNow
+        isPassengerAuthorized = true;
+    }
+    
+    // Future: Check PassengerId claim when implemented
+    // if (!isPassengerAuthorized && userSub == booking.PassengerId) ...
+    
+    if (!isPassengerAuthorized)
+    {
+        return Results.Problem(
+            statusCode: 403,
+            title: "Forbidden",
+            detail: "You can only view location for your own bookings");
+    }
+
+    var location = locationService.GetLatestLocation(rideId);
+    if (location is null)
+    {
+        // Return a "tracking not started" response instead of 404
+        return Results.Ok(new
+        {
+            rideId,
+            trackingActive = false,
+            message = "Driver has not started tracking yet",
+            currentStatus = booking.CurrentRideStatus?.ToString() ?? "Scheduled"
+        });
+    }
+
+    return Results.Ok(new LocationResponse
+    {
+        RideId = location.RideId,
+        Latitude = location.Latitude,
+        Longitude = location.Longitude,
+        Timestamp = location.Timestamp,
+        Heading = location.Heading,
+        Speed = location.Speed,
+        Accuracy = location.Accuracy,
+        AgeSeconds = (DateTime.UtcNow - location.Timestamp).TotalSeconds,
+        DriverUid = booking.AssignedDriverUid,
+        DriverName = booking.AssignedDriverName
     });
 })
-.WithName("GetRideLocations")
-.RequireAuthorization();
+.WithName("GetPassengerRideLocation")
+.RequireAuthorization(); // Passengers authenticate via PassengerApp
 
 // ===================================================================
 // AFFILIATE & DRIVER MANAGEMENT ENDPOINTS

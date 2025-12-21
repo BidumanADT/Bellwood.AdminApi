@@ -161,10 +161,13 @@ Returns API health status (no auth required).
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/driver/location/{rideId}` | GET | Get latest location for a ride |
-| `/admin/locations` | GET | Get all active driver locations |
-| `/admin/locations/rides?rideIds=a,b,c` | GET | Batch query specific rides |
+| `/passenger/rides/{rideId}/location` | GET | **NEW:** Get location for passenger's own ride (secure) |
+| `/driver/location/{rideId}` | GET | Get latest location for a ride (driver/admin) |
+| `/admin/locations` | GET | Get all active driver locations (admin) |
+| `/admin/locations/rides?rideIds=a,b,c` | GET | Batch query specific rides (admin) |
 | `/hubs/location` | WebSocket | SignalR hub for real-time updates |
+
+**Passenger Endpoint**: Verifies booking ownership via email before returning location
 
 ---
 
@@ -624,5 +627,3 @@ For issues or questions:
 ✅ **Test Data Scripts** for rapid development  
 ✅ **Mobile-Optimized** for PassengerApp and DriverApp  
 ✅ **Production-Ready** with proper error handling and logging  
-
----
