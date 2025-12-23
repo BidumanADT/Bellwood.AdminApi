@@ -1,4 +1,4 @@
-﻿ # Passenger Location Tracking - Complete Solution
+﻿# Passenger Location Tracking - Complete Solution
 
 ## Overview
 
@@ -115,6 +115,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```json
 {
   "rideId": "abc123",
+  "trackingActive": true,       // ← ALWAYS TRUE when location exists
   "latitude": 41.8781,
   "longitude": -87.6298,
   "timestamp": "2024-12-18T15:30:15Z",
@@ -132,7 +133,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```json
 {
   "rideId": "abc123",
-  "trackingActive": false,
+  "trackingActive": false,      // ← ALWAYS FALSE when no location
   "message": "Driver has not started tracking yet",
   "currentStatus": "Scheduled"
 }

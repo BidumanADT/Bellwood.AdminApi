@@ -1225,18 +1225,20 @@ app.MapGet("/passenger/rides/{rideId}/location", async (
         });
     }
 
-    return Results.Ok(new LocationResponse
+    // FIX: Return anonymous object with trackingActive = true for PassengerApp
+    return Results.Ok(new
     {
-        RideId = location.RideId,
-        Latitude = location.Latitude,
-        Longitude = location.Longitude,
-        Timestamp = location.Timestamp,
-        Heading = location.Heading,
-        Speed = location.Speed,
-        Accuracy = location.Accuracy,
-        AgeSeconds = (DateTime.UtcNow - location.Timestamp).TotalSeconds,
-        DriverUid = booking.AssignedDriverUid,
-        DriverName = booking.AssignedDriverName
+        rideId = location.RideId,
+        trackingActive = true,  // ? ADD THIS - PassengerApp expects this field!
+        latitude = location.Latitude,
+        longitude = location.Longitude,
+        timestamp = location.Timestamp,
+        heading = location.Heading,
+        speed = location.Speed,
+        accuracy = location.Accuracy,
+        ageSeconds = (DateTime.UtcNow - location.Timestamp).TotalSeconds,
+        driverUid = booking.AssignedDriverUid,
+        driverName = booking.AssignedDriverName
     });
 })
 .WithName("GetPassengerRideLocation")
