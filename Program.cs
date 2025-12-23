@@ -2,11 +2,13 @@ using System.Text;
 using System.Text.Json.Serialization;
 using Bellwood.AdminApi.Models;
 using Bellwood.AdminApi.Services;
+using Bellwood.AdminApi.Hubs;
 using BellwoodGlobal.Mobile.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -26,6 +28,15 @@ builder.Services.AddSingleton<IDriverRepository, FileDriverRepository>();
 
 // Location tracking service (in-memory)
 builder.Services.AddSingleton<ILocationService, InMemoryLocationService>();
+
+// SignalR for real-time location updates
+builder.Services.AddSignalR(options =>
+{
+    options.EnableDetailedErrors = builder.Environment.IsDevelopment();
+});
+
+// Background service for broadcasting location updates via SignalR
+builder.Services.AddHostedService<LocationBroadcastService>();
 
 // API documentation
 builder.Services.AddEndpointsApiExplorer();
@@ -59,9 +70,22 @@ builder.Services.AddAuthentication(options =>
         NameClaimType = "sub"        // Map "sub" claim to username
     };
     
-    // Add authentication event handlers for debugging
+    // Add authentication event handlers for debugging and SignalR support
     options.Events = new JwtBearerEvents
     {
+        // Handle SignalR WebSocket authentication (token in query string)
+        OnMessageReceived = context =>
+        {
+            var accessToken = context.Request.Query["access_token"];
+            var path = context.HttpContext.Request.Path;
+            
+            // If the request is for our SignalR hub, extract token from query string
+            if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs/location"))
+            {
+                context.Token = accessToken;
+            }
+            return Task.CompletedTask;
+        },
         OnAuthenticationFailed = context =>
         {
             Console.WriteLine($"?? Authentication FAILED: {context.Exception.GetType().Name}");
@@ -149,6 +173,9 @@ app.UseCors();
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+// Map SignalR hub for real-time location updates
+app.MapHub<LocationHub>("/hubs/location");
 
 if (app.Environment.IsDevelopment())
 {
@@ -619,24 +646,49 @@ app.MapPost("/bookings", async (
 .RequireAuthorization();
 
 // GET /bookings/list - List recent bookings (paginated)
-app.MapGet("/bookings/list", async ([FromQuery] int take, IBookingRepository repo) =>
+app.MapGet("/bookings/list", async ([FromQuery] int take, HttpContext context, IBookingRepository repo) =>
 {
     take = (take <= 0 || take > 200) ? 50 : take;
     var rows = await repo.ListAsync(take);
+    
+    // Get user's timezone for PickupDateTimeOffset conversion
+    // Default to Central Time for admin users who don't send X-Timezone-Id header
+    var userTz = GetRequestTimeZone(context);
 
-    var list = rows.Select(r => new {
-        r.Id,
-        r.CreatedUtc,
-        Status = r.Status.ToString(),
-        r.BookerName,
-        r.PassengerName,
-        r.VehicleClass,
-        r.PickupLocation,
-        r.DropoffLocation,
-        r.PickupDateTime,
-        AssignedDriverId = r.AssignedDriverId,
-        AssignedDriverUid = r.AssignedDriverUid,
-        AssignedDriverName = r.AssignedDriverName ?? "Unassigned"
+    var list = rows.Select(r =>
+    {
+        // FIX: Handle DateTime.Kind for PickupDateTimeOffset
+        DateTimeOffset pickupOffset;
+        if (r.PickupDateTime.Kind == DateTimeKind.Utc)
+        {
+            var pickupLocal = TimeZoneInfo.ConvertTimeFromUtc(r.PickupDateTime, userTz);
+            pickupOffset = new DateTimeOffset(pickupLocal, userTz.GetUtcOffset(pickupLocal));
+        }
+        else
+        {
+            pickupOffset = new DateTimeOffset(r.PickupDateTime, userTz.GetUtcOffset(r.PickupDateTime));
+        }
+        
+        return new
+        {
+            r.Id,
+            r.CreatedUtc,
+            Status = r.Status.ToString(),
+            // FIX: Include CurrentRideStatus for real-time driver progress
+            CurrentRideStatus = r.CurrentRideStatus?.ToString(),
+            r.BookerName,
+            r.PassengerName,
+            r.VehicleClass,
+            r.PickupLocation,
+            r.DropoffLocation,
+            // Keep old property for backward compatibility
+            r.PickupDateTime,
+            // FIX: Add PickupDateTimeOffset for correct timezone display
+            PickupDateTimeOffset = pickupOffset,
+            AssignedDriverId = r.AssignedDriverId,
+            AssignedDriverUid = r.AssignedDriverUid,
+            AssignedDriverName = r.AssignedDriverName ?? "Unassigned"
+        };
     });
 
     return Results.Ok(list);
@@ -645,22 +697,42 @@ app.MapGet("/bookings/list", async ([FromQuery] int take, IBookingRepository rep
 .RequireAuthorization();
 
 // GET /bookings/{id} - Get detailed booking by ID
-app.MapGet("/bookings/{id}", async (string id, IBookingRepository repo) =>
+app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepository repo) =>
 {
     var rec = await repo.GetAsync(id);
     if (rec is null) return Results.NotFound();
+    
+    // Get user's timezone for PickupDateTimeOffset conversion
+    var userTz = GetRequestTimeZone(context);
+    
+    // Handle DateTime.Kind for PickupDateTimeOffset
+    DateTimeOffset pickupOffset;
+    if (rec.PickupDateTime.Kind == DateTimeKind.Utc)
+    {
+        var pickupLocal = TimeZoneInfo.ConvertTimeFromUtc(rec.PickupDateTime, userTz);
+        pickupOffset = new DateTimeOffset(pickupLocal, userTz.GetUtcOffset(pickupLocal));
+    }
+    else
+    {
+        pickupOffset = new DateTimeOffset(rec.PickupDateTime, userTz.GetUtcOffset(rec.PickupDateTime));
+    }
 
     return Results.Ok(new
     {
         rec.Id,
         rec.CreatedUtc,
         Status = rec.Status.ToString(),
+        // FIX: Include CurrentRideStatus for real-time driver progress
+        CurrentRideStatus = rec.CurrentRideStatus?.ToString(),
         rec.BookerName,
         rec.PassengerName,
         rec.VehicleClass,
         rec.PickupLocation,
         rec.DropoffLocation,
+        // Keep old property for backward compatibility
         rec.PickupDateTime,
+        // FIX: Add PickupDateTimeOffset for correct timezone display
+        PickupDateTimeOffset = pickupOffset,
         rec.Draft,
         AssignedDriverId = rec.AssignedDriverId,
         AssignedDriverUid = rec.AssignedDriverUid,
@@ -724,6 +796,53 @@ app.MapPost("/bookings/{id}/cancel", async (
 static string? GetDriverUid(HttpContext context) =>
     context.User.Claims.FirstOrDefault(c => c.Type == "uid")?.Value;
 
+// Helper: Get timezone from request header or fallback to Central (for backward compatibility)
+static TimeZoneInfo GetRequestTimeZone(HttpContext context)
+{
+    // Try to get timezone from header (e.g., "America/New_York", "Europe/London", "Asia/Tokyo")
+    var timezoneHeader = context.Request.Headers["X-Timezone-Id"].FirstOrDefault();
+    
+    if (!string.IsNullOrWhiteSpace(timezoneHeader))
+    {
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById(timezoneHeader);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"?? Invalid timezone ID in header '{timezoneHeader}': {ex.Message}");
+            // Fall through to default
+        }
+    }
+    
+    // Fallback: Try Central Time (for backward compatibility with existing deployments)
+    return GetCentralTimeZone();
+}
+
+// Helper: Get Central Standard Time (Bellwood's original operating timezone)
+static TimeZoneInfo GetCentralTimeZone()
+{
+    try
+    {
+        // Try to get Central Standard Time
+        return TimeZoneInfo.FindSystemTimeZoneById("Central Standard Time");
+    }
+    catch
+    {
+        // Fallback for Linux/Mac (uses IANA timezone IDs)
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
+        }
+        catch
+        {
+            // Last resort: return local timezone (assumes server is in Central)
+            Console.WriteLine("?? Warning: Could not load Central timezone, using server local time");
+            return TimeZoneInfo.Local;
+        }
+    }
+}
+
 // GET /driver/rides/today - Get driver's rides for the next 24 hours
 app.MapGet("/driver/rides/today", async (HttpContext context, IBookingRepository repo) =>
 {
@@ -731,26 +850,53 @@ app.MapGet("/driver/rides/today", async (HttpContext context, IBookingRepository
     if (string.IsNullOrEmpty(driverUid))
         return Results.Unauthorized();
 
-    var now = DateTime.UtcNow;
-    var tomorrow = now.AddHours(24);
+    // WORLDWIDE FIX: Use timezone from request header (driver's device timezone)
+    // Mobile apps should send X-Timezone-Id header (e.g., "America/New_York", "Europe/London")
+    // Falls back to Central Time for backward compatibility
+    var driverTz = GetRequestTimeZone(context);
+    var nowLocal = TimeZoneInfo.ConvertTime(DateTime.UtcNow, driverTz);
+    var tomorrowLocal = nowLocal.AddHours(24);
+    
+    // Log timezone for debugging (remove in production)
+    Console.WriteLine($"?? Driver {driverUid} timezone: {driverTz.Id}, current time: {nowLocal:yyyy-MM-dd HH:mm}");
 
     var allBookings = await repo.ListAsync(200); // Get enough to filter
     var driverRides = allBookings
         .Where(b => b.AssignedDriverUid == driverUid
-                    && b.PickupDateTime >= now
-                    && b.PickupDateTime <= tomorrow
+                    && b.PickupDateTime >= nowLocal
+                    && b.PickupDateTime <= tomorrowLocal
                     && b.CurrentRideStatus != RideStatus.Completed
                     && b.CurrentRideStatus != RideStatus.Cancelled)
         .OrderBy(b => b.PickupDateTime)
-        .Select(b => new DriverRideListItemDto
+        .Select(b =>
         {
-            Id = b.Id,
-            PickupDateTime = b.PickupDateTime,
-            PickupLocation = b.PickupLocation,
-            DropoffLocation = b.DropoffLocation,
-            PassengerName = b.PassengerName,
-            PassengerPhone = b.Draft.Passenger?.PhoneNumber ?? "N/A",
-            Status = b.CurrentRideStatus ?? RideStatus.Scheduled
+            // FIX: Handle both UTC and Unspecified DateTime.Kind
+            // Seed data has Kind=Utc, mobile app data has Kind=Unspecified
+            DateTimeOffset pickupOffset;
+            
+            if (b.PickupDateTime.Kind == DateTimeKind.Utc)
+            {
+                // Convert UTC to driver's local timezone first, then create offset
+                var pickupLocal = TimeZoneInfo.ConvertTimeFromUtc(b.PickupDateTime, driverTz);
+                pickupOffset = new DateTimeOffset(pickupLocal, driverTz.GetUtcOffset(pickupLocal));
+            }
+            else
+            {
+                // Unspecified or Local - treat as already in correct timezone
+                pickupOffset = new DateTimeOffset(b.PickupDateTime, driverTz.GetUtcOffset(b.PickupDateTime));
+            }
+            
+            return new DriverRideListItemDto
+            {
+                Id = b.Id,
+                PickupDateTime = b.PickupDateTime, // Keep for backward compatibility
+                PickupDateTimeOffset = pickupOffset,
+                PickupLocation = b.PickupLocation,
+                DropoffLocation = b.DropoffLocation,
+                PassengerName = b.PassengerName,
+                PassengerPhone = b.Draft.Passenger?.PhoneNumber ?? "N/A",
+                Status = b.CurrentRideStatus ?? RideStatus.Scheduled
+            };
         })
         .ToList();
 
@@ -774,10 +920,28 @@ app.MapGet("/driver/rides/{id}", async (string id, HttpContext context, IBooking
     if (booking.AssignedDriverUid != driverUid)
         return Results.Forbid();
 
+    // Get driver's timezone for correct pickup time display
+    var driverTz = GetRequestTimeZone(context);
+    
+    // FIX: Handle both UTC and Unspecified DateTime.Kind
+    DateTimeOffset pickupOffset;
+    if (booking.PickupDateTime.Kind == DateTimeKind.Utc)
+    {
+        // Convert UTC to driver's local timezone first
+        var pickupLocal = TimeZoneInfo.ConvertTimeFromUtc(booking.PickupDateTime, driverTz);
+        pickupOffset = new DateTimeOffset(pickupLocal, driverTz.GetUtcOffset(pickupLocal));
+    }
+    else
+    {
+        // Unspecified or Local - treat as already in correct timezone
+        pickupOffset = new DateTimeOffset(booking.PickupDateTime, driverTz.GetUtcOffset(booking.PickupDateTime));
+    }
+
     var detail = new DriverRideDetailDto
     {
         Id = booking.Id,
-        PickupDateTime = booking.PickupDateTime,
+        PickupDateTime = booking.PickupDateTime, // Keep for backward compatibility
+        PickupDateTimeOffset = pickupOffset,
         PickupLocation = booking.PickupLocation,
         PickupStyle = booking.Draft.PickupStyle.ToString(),
         PickupSignText = booking.Draft.PickupSignText,
@@ -804,6 +968,8 @@ app.MapPost("/driver/rides/{id}/status", async (
     [FromBody] RideStatusUpdateRequest request,
     HttpContext context,
     IBookingRepository repo,
+    ILocationService locationService,
+    IHubContext<LocationHub> hubContext,
     ILoggerFactory loggerFactory) =>
 {
     // Finite state machine for ride status transitions
@@ -846,30 +1012,52 @@ app.MapPost("/driver/rides/{id}/status", async (
     booking.CurrentRideStatus = request.NewStatus;
 
     // Sync with BookingStatus
+    BookingStatus newBookingStatus = booking.Status;
     if (request.NewStatus == RideStatus.PassengerOnboard)
-        booking.Status = BookingStatus.InProgress;
+        newBookingStatus = BookingStatus.InProgress;
     else if (request.NewStatus == RideStatus.Completed)
-        booking.Status = BookingStatus.Completed;
+        newBookingStatus = BookingStatus.Completed;
     else if (request.NewStatus == RideStatus.Cancelled)
-        booking.Status = BookingStatus.Cancelled;
+        newBookingStatus = BookingStatus.Cancelled;
 
-    await repo.UpdateStatusAsync(id, booking.Status);
+    // FIX: Use new method that persists BOTH CurrentRideStatus and Status
+    await repo.UpdateRideStatusAsync(id, request.NewStatus, newBookingStatus);
+
+    // Broadcast status change to AdminPortal and passengers via SignalR
+    await hubContext.BroadcastRideStatusChangedAsync(
+        id, 
+        driverUid, 
+        request.NewStatus,
+        booking.AssignedDriverName,
+        booking.PassengerName);
+
+    // Clean up location data and notify clients when ride ends
+    if (request.NewStatus == RideStatus.Completed || request.NewStatus == RideStatus.Cancelled)
+    {
+        locationService.RemoveLocation(id);
+        var reason = request.NewStatus == RideStatus.Completed ? "Ride completed" : "Ride cancelled";
+        await hubContext.NotifyTrackingStoppedAsync(id, reason);
+        log.LogInformation("Location tracking stopped for ride {Id}: {Reason}", id, reason);
+    }
 
     log.LogInformation("Driver {Uid} updated ride {Id} status to {Status}",
         driverUid, id, request.NewStatus);
 
+    // Updated response contract for Phase 2
     return Results.Ok(new
     {
-        message = "Status updated successfully",
+        success = true,
         rideId = id,
-        newStatus = request.NewStatus.ToString()
+        newStatus = request.NewStatus.ToString(),
+        bookingStatus = newBookingStatus.ToString(),
+        timestamp = DateTime.UtcNow
     });
 })
 .WithName("UpdateRideStatus")
 .RequireAuthorization("DriverOnly");
 
 // POST /driver/location/update - Receive location updates (rate-limited)
-app.MapPost("/driver/location/update", (
+app.MapPost("/driver/location/update", async (
     [FromBody] LocationUpdate update,
     HttpContext context,
     ILocationService locationService,
@@ -879,39 +1067,42 @@ app.MapPost("/driver/location/update", (
     var log = loggerFactory.CreateLogger("driver");
     var driverUid = GetDriverUid(context);
     if (string.IsNullOrEmpty(driverUid))
-        return Task.FromResult(Results.Unauthorized());
+        return Results.Unauthorized();
 
     // Verify ride exists and belongs to driver
-    return repo.GetAsync(update.RideId).ContinueWith<IResult>(task =>
+    var booking = await repo.GetAsync(update.RideId);
+    if (booking is null || booking.AssignedDriverUid != driverUid)
+        return Results.NotFound(new { error = "Ride not found" });
+
+    // Only accept updates for active rides
+    var activeStatuses = new[] { RideStatus.OnRoute, RideStatus.Arrived, RideStatus.PassengerOnboard };
+    if (!booking.CurrentRideStatus.HasValue || !activeStatuses.Contains(booking.CurrentRideStatus.Value))
     {
-        var booking = task.Result;
-        if (booking is null || booking.AssignedDriverUid != driverUid)
-            return Results.NotFound(new { error = "Ride not found" });
+        return Results.BadRequest(new { error = "Location tracking not active for this ride" });
+    }
 
-        // Only accept updates for active rides
-        var activeStatuses = new[] { RideStatus.OnRoute, RideStatus.Arrived, RideStatus.PassengerOnboard };
-        if (!booking.CurrentRideStatus.HasValue || !activeStatuses.Contains(booking.CurrentRideStatus.Value))
-        {
-            return Results.BadRequest(new { error = "Location tracking not active for this ride" });
-        }
+    // Try to store location (rate-limited) - SignalR broadcast happens via event
+    if (!locationService.TryUpdateLocation(driverUid, update))
+    {
+        return Results.StatusCode(429); // Too Many Requests
+    }
 
-        // Try to store location (rate-limited)
-        if (!locationService.TryUpdateLocation(driverUid, update))
-        {
-            return Results.StatusCode(429); // Too Many Requests
-        }
+    log.LogDebug("Location updated for ride {RideId} by driver {Uid}: ({Lat}, {Lon}), heading={Heading}, speed={Speed}", 
+        update.RideId, driverUid, update.Latitude, update.Longitude, update.Heading, update.Speed);
 
-        log.LogDebug("Location updated for ride {RideId} by driver {Uid}", update.RideId, driverUid);
-
-        return Results.Ok(new { message = "Location updated" });
+    return Results.Ok(new { 
+        message = "Location updated",
+        rideId = update.RideId,
+        timestamp = DateTime.UtcNow
     });
 })
 .WithName("UpdateDriverLocation")
 .RequireAuthorization("DriverOnly");
 
-// GET /driver/location/{rideId} - Get latest location for a ride (admin/passenger use)
+// GET /driver/location/{rideId} - Get latest location for a ride (admin/driver/passenger use)
 app.MapGet("/driver/location/{rideId}", async (
     string rideId,
+    HttpContext context,
     ILocationService locationService,
     IBookingRepository repo) =>
 {
@@ -919,21 +1110,227 @@ app.MapGet("/driver/location/{rideId}", async (
     if (booking is null)
         return Results.NotFound();
 
+    // SECURITY FIX: Verify caller has permission to view this ride's location
+    var driverUid = GetDriverUid(context);
+    var userRole = context.User.FindFirst("role")?.Value;
+    var userSub = context.User.FindFirst("sub")?.Value;
+    
+    // Allow access if:
+    // 1. User is the assigned driver
+    // 2. User is an admin or dispatcher
+    // 3. User is authenticated but has no role (backward compatibility for AdminPortal)
+    bool isAuthorized = false;
+    
+    if (!string.IsNullOrEmpty(driverUid) && driverUid == booking.AssignedDriverUid)
+    {
+        isAuthorized = true; // Driver can see their own ride
+    }
+    else if (userRole == "admin" || userRole == "dispatcher")
+    {
+        isAuthorized = true; // Admins can see all rides
+    }
+    else if (string.IsNullOrEmpty(userRole) && context.User.Identity?.IsAuthenticated == true)
+    {
+        // FIX: AdminPortal users don't have role claim yet
+        // Allow authenticated users without roles (backward compatibility)
+        // TODO: Remove this once AdminPortal users have proper role claims
+        isAuthorized = true;
+    }
+    
+    if (!isAuthorized)
+    {
+        return Results.Problem(
+            statusCode: 403,
+            title: "Forbidden",
+            detail: "You do not have permission to view this ride's location");
+    }
+
     var location = locationService.GetLatestLocation(rideId);
     if (location is null)
         return Results.NotFound(new { message = "No recent location data" });
 
-    return Results.Ok(new
+    return Results.Ok(new LocationResponse
     {
-        rideId = location.RideId,
-        latitude = location.Latitude,
-        longitude = location.Longitude,
-        timestamp = location.Timestamp,
-        ageSeconds = (DateTime.UtcNow - location.Timestamp).TotalSeconds
+        RideId = location.RideId,
+        Latitude = location.Latitude,
+        Longitude = location.Longitude,
+        Timestamp = location.Timestamp,
+        Heading = location.Heading,
+        Speed = location.Speed,
+        Accuracy = location.Accuracy,
+        AgeSeconds = (DateTime.UtcNow - location.Timestamp).TotalSeconds,
+        DriverUid = booking.AssignedDriverUid,
+        DriverName = booking.AssignedDriverName
     });
 })
 .WithName("GetRideLocation")
-.RequireAuthorization(); // Any authenticated user can track
+.RequireAuthorization(); // Authenticated users only, then check permissions
+
+// GET /passenger/rides/{rideId}/location - Get location for passenger's own ride
+app.MapGet("/passenger/rides/{rideId}/location", async (
+    string rideId,
+    HttpContext context,
+    ILocationService locationService,
+    IBookingRepository repo) =>
+{
+    var booking = await repo.GetAsync(rideId);
+    if (booking is null)
+        return Results.NotFound(new { error = "Ride not found" });
+
+    // PASSENGER AUTHORIZATION: Verify caller owns this booking
+    // Check if user's email or sub claim matches the booker/passenger email
+    var userSub = context.User.FindFirst("sub")?.Value;
+    var userEmail = context.User.FindFirst("email")?.Value;
+    
+    bool isPassengerAuthorized = false;
+    
+    // Check booker email
+    if (!string.IsNullOrEmpty(userEmail) && 
+        !string.IsNullOrEmpty(booking.Draft?.Booker?.EmailAddress) &&
+        userEmail.Equals(booking.Draft.Booker.EmailAddress, StringComparison.OrdinalIgnoreCase))
+    {
+        isPassengerAuthorized = true;
+    }
+    
+    // Check passenger email (if different from booker)
+    if (!isPassengerAuthorized && 
+        !string.IsNullOrEmpty(userEmail) &&
+        !string.IsNullOrEmpty(booking.Draft?.Passenger?.EmailAddress) &&
+        userEmail.Equals(booking.Draft.Passenger.EmailAddress, StringComparison.OrdinalIgnoreCase))
+    {
+        isPassengerAuthorized = true;
+    }
+    
+    // Future: Check PassengerId claim when implemented
+    // if (!isPassengerAuthorized && userSub == booking.PassengerId) ...
+    
+    if (!isPassengerAuthorized)
+    {
+        return Results.Problem(
+            statusCode: 403,
+            title: "Forbidden",
+            detail: "You can only view location for your own bookings");
+    }
+
+    var location = locationService.GetLatestLocation(rideId);
+    if (location is null)
+    {
+        // Return a "tracking not started" response instead of 404
+        return Results.Ok(new
+        {
+            rideId,
+            trackingActive = false,
+            message = "Driver has not started tracking yet",
+            currentStatus = booking.CurrentRideStatus?.ToString() ?? "Scheduled"
+        });
+    }
+
+    // FIX: Return anonymous object with trackingActive = true for PassengerApp
+    return Results.Ok(new
+    {
+        rideId = location.RideId,
+        trackingActive = true,  // ? ADD THIS - PassengerApp expects this field!
+        latitude = location.Latitude,
+        longitude = location.Longitude,
+        timestamp = location.Timestamp,
+        heading = location.Heading,
+        speed = location.Speed,
+        accuracy = location.Accuracy,
+        ageSeconds = (DateTime.UtcNow - location.Timestamp).TotalSeconds,
+        driverUid = booking.AssignedDriverUid,
+        driverName = booking.AssignedDriverName
+    });
+})
+.WithName("GetPassengerRideLocation")
+.RequireAuthorization(); // Passengers authenticate via PassengerApp
+
+// GET /admin/locations - Get all active driver locations (admin dashboard)
+app.MapGet("/admin/locations", async (
+    ILocationService locationService,
+    IBookingRepository bookingRepo) =>
+{
+    var activeLocations = locationService.GetAllActiveLocations();
+    var result = new List<ActiveRideLocationDto>();
+    
+    foreach (var entry in activeLocations)
+    {
+        var booking = await bookingRepo.GetAsync(entry.Update.RideId);
+        if (booking is null) continue;
+        
+        result.Add(new ActiveRideLocationDto
+        {
+            RideId = entry.Update.RideId,
+            DriverUid = entry.DriverUid,
+            DriverName = booking.AssignedDriverName,
+            PassengerName = booking.PassengerName,
+            PickupLocation = booking.PickupLocation,
+            DropoffLocation = booking.DropoffLocation,
+            CurrentStatus = booking.CurrentRideStatus,
+            Latitude = entry.Update.Latitude,
+            Longitude = entry.Update.Longitude,
+            Timestamp = entry.Update.Timestamp,
+            Heading = entry.Update.Heading,
+            Speed = entry.Update.Speed,
+            AgeSeconds = entry.AgeSeconds
+        });
+    }
+    
+    return Results.Ok(new
+    {
+        count = result.Count,
+        locations = result,
+        timestamp = DateTime.UtcNow
+    });
+})
+.WithName("GetAllActiveLocations")
+.RequireAuthorization(); // TODO: Add admin-only policy when ready
+
+// GET /admin/locations/rides - Get locations for specific ride IDs (batch query)
+app.MapGet("/admin/locations/rides", async (
+    [FromQuery] string rideIds,
+    ILocationService locationService,
+    IBookingRepository bookingRepo) =>
+{
+    if (string.IsNullOrWhiteSpace(rideIds))
+        return Results.BadRequest(new { error = "rideIds query parameter is required" });
+    
+    var ids = rideIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    var entries = locationService.GetLocations(ids);
+    var result = new List<ActiveRideLocationDto>();
+    
+    foreach (var entry in entries)
+    {
+        var booking = await bookingRepo.GetAsync(entry.Update.RideId);
+        if (booking is null) continue;
+        
+        result.Add(new ActiveRideLocationDto
+        {
+            RideId = entry.Update.RideId,
+            DriverUid = entry.DriverUid,
+            DriverName = booking.AssignedDriverName,
+            PassengerName = booking.PassengerName,
+            PickupLocation = booking.PickupLocation,
+            DropoffLocation = booking.DropoffLocation,
+            CurrentStatus = booking.CurrentRideStatus,
+            Latitude = entry.Update.Latitude,
+            Longitude = entry.Update.Longitude,
+            Timestamp = entry.Update.Timestamp,
+            Heading = entry.Update.Heading,
+            Speed = entry.Update.Speed,
+            AgeSeconds = entry.AgeSeconds
+        });
+    }
+    
+    return Results.Ok(new
+    {
+        requested = ids.Length,
+        found = result.Count,
+        locations = result,
+        timestamp = DateTime.UtcNow
+    });
+})
+.WithName("GetRideLocations")
+.RequireAuthorization();
 
 // ===================================================================
 // AFFILIATE & DRIVER MANAGEMENT ENDPOINTS

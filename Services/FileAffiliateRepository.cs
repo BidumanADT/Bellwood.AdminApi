@@ -8,6 +8,7 @@ public sealed class FileAffiliateRepository : IAffiliateRepository
 {
     private readonly string _filePath;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private bool _initialized = false;
 
     private static readonly JsonSerializerOptions _opts = new()
     {
@@ -21,11 +22,31 @@ public sealed class FileAffiliateRepository : IAffiliateRepository
         var dir = Path.Combine(env.ContentRootPath, "App_Data");
         Directory.CreateDirectory(dir);
         _filePath = Path.Combine(dir, "affiliates.json");
-        if (!File.Exists(_filePath)) File.WriteAllText(_filePath, "[]");
+    }
+
+    private async Task EnsureInitializedAsync()
+    {
+        if (_initialized) return;
+        
+        await _gate.WaitAsync();
+        try
+        {
+            // Double-check after acquiring lock
+            if (_initialized) return;
+            
+            if (!File.Exists(_filePath))
+            {
+                await File.WriteAllTextAsync(_filePath, "[]");
+            }
+            
+            _initialized = true;
+        }
+        finally { _gate.Release(); }
     }
 
     public async Task<List<Affiliate>> GetAllAsync(CancellationToken ct = default)
     {
+        await EnsureInitializedAsync();
         await _gate.WaitAsync(ct);
         try
         {
@@ -42,6 +63,7 @@ public sealed class FileAffiliateRepository : IAffiliateRepository
 
     public async Task AddAsync(Affiliate affiliate, CancellationToken ct = default)
     {
+        await EnsureInitializedAsync();
         await _gate.WaitAsync(ct);
         try
         {
@@ -53,50 +75,48 @@ public sealed class FileAffiliateRepository : IAffiliateRepository
                 affiliate.Id = Guid.NewGuid().ToString("N");
             }
 
-            // Clear drivers list before persisting (drivers stored separately)
-            var driversToAdd = affiliate.Drivers?.ToList() ?? new();
-            affiliate.Drivers = new();
-
             list.Add(affiliate);
             await WriteAllAsync(list);
-
-            // Restore drivers list for the returned object
-            affiliate.Drivers = driversToAdd;
         }
         finally { _gate.Release(); }
     }
 
     public async Task UpdateAsync(Affiliate affiliate, CancellationToken ct = default)
     {
+        await EnsureInitializedAsync();
         await _gate.WaitAsync(ct);
         try
         {
             var list = await ReadAllAsync();
             var existing = list.FirstOrDefault(a => a.Id == affiliate.Id);
-            if (existing is null) return;
 
-            // Preserve any drivers reference but don't persist it
-            var driversRef = affiliate.Drivers;
-            affiliate.Drivers = new();
+            if (existing != null)
+            {
+                // Update all properties except ID
+                existing.Name = affiliate.Name;
+                existing.PointOfContact = affiliate.PointOfContact;
+                existing.Phone = affiliate.Phone;
+                existing.Email = affiliate.Email;
+                existing.StreetAddress = affiliate.StreetAddress;
+                existing.City = affiliate.City;
+                existing.State = affiliate.State;
 
-            list.Remove(existing);
-            list.Add(affiliate);
-            await WriteAllAsync(list);
-
-            // Restore drivers list
-            affiliate.Drivers = driversRef;
+                await WriteAllAsync(list);
+            }
         }
         finally { _gate.Release(); }
     }
 
     public async Task DeleteAsync(string id, CancellationToken ct = default)
     {
+        await EnsureInitializedAsync();
         await _gate.WaitAsync(ct);
         try
         {
             var list = await ReadAllAsync();
             var toRemove = list.FirstOrDefault(a => a.Id == id);
-            if (toRemove is not null)
+
+            if (toRemove != null)
             {
                 list.Remove(toRemove);
                 await WriteAllAsync(list);
@@ -107,6 +127,12 @@ public sealed class FileAffiliateRepository : IAffiliateRepository
 
     private async Task<List<Affiliate>> ReadAllAsync()
     {
+        // Check if file exists before trying to open it
+        if (!File.Exists(_filePath))
+        {
+            return new List<Affiliate>();
+        }
+        
         using var fs = File.OpenRead(_filePath);
         var affiliates = await JsonSerializer.DeserializeAsync<List<Affiliate>>(fs, _opts) ?? new();
         
