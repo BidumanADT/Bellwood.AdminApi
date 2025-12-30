@@ -666,13 +666,21 @@ app.MapGet("/bookings/list", async ([FromQuery] int take, HttpContext context, I
         }
         else
         {
-            pickupOffset = new DateTimeOffset(r.PickupDateTime, userTz.GetUtcOffset(r.PickupDateTime));
+            // Local or Unspecified - treat as already in userTz timezone
+            // Must convert to Unspecified to avoid offset mismatch
+            var unspecified = DateTime.SpecifyKind(r.PickupDateTime, DateTimeKind.Unspecified);
+            pickupOffset = new DateTimeOffset(unspecified, userTz.GetUtcOffset(unspecified));
         }
+        
+        // FIX: Convert CreatedUtc to user's local timezone
+        var createdLocal = TimeZoneInfo.ConvertTimeFromUtc(r.CreatedUtc, userTz);
+        var createdOffset = new DateTimeOffset(createdLocal, userTz.GetUtcOffset(createdLocal));
         
         return new
         {
             r.Id,
-            r.CreatedUtc,
+            r.CreatedUtc, // Keep for backward compatibility
+            CreatedDateTimeOffset = createdOffset, // Add timezone-aware version
             Status = r.Status.ToString(),
             // FIX: Include CurrentRideStatus for real-time driver progress
             CurrentRideStatus = r.CurrentRideStatus?.ToString(),
@@ -714,13 +722,21 @@ app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepo
     }
     else
     {
-        pickupOffset = new DateTimeOffset(rec.PickupDateTime, userTz.GetUtcOffset(rec.PickupDateTime));
+        // Local or Unspecified - treat as already in userTz timezone
+        // Must convert to Unspecified to avoid offset mismatch
+        var unspecified = DateTime.SpecifyKind(rec.PickupDateTime, DateTimeKind.Unspecified);
+        pickupOffset = new DateTimeOffset(unspecified, userTz.GetUtcOffset(unspecified));
     }
+    
+    // FIX: Convert CreatedUtc to user's local timezone
+    var createdLocal = TimeZoneInfo.ConvertTimeFromUtc(rec.CreatedUtc, userTz);
+    var createdOffset = new DateTimeOffset(createdLocal, userTz.GetUtcOffset(createdLocal));
 
     return Results.Ok(new
     {
         rec.Id,
-        rec.CreatedUtc,
+        rec.CreatedUtc, // Keep for backward compatibility
+        CreatedDateTimeOffset = createdOffset, // Add timezone-aware version
         Status = rec.Status.ToString(),
         // FIX: Include CurrentRideStatus for real-time driver progress
         CurrentRideStatus = rec.CurrentRideStatus?.ToString(),
@@ -882,8 +898,10 @@ app.MapGet("/driver/rides/today", async (HttpContext context, IBookingRepository
             }
             else
             {
-                // Unspecified or Local - treat as already in correct timezone
-                pickupOffset = new DateTimeOffset(b.PickupDateTime, driverTz.GetUtcOffset(b.PickupDateTime));
+                // Local or Unspecified - treat as already in correct timezone
+                // Must convert to Unspecified to avoid offset mismatch
+                var unspecified = DateTime.SpecifyKind(b.PickupDateTime, DateTimeKind.Unspecified);
+                pickupOffset = new DateTimeOffset(unspecified, driverTz.GetUtcOffset(unspecified));
             }
             
             return new DriverRideListItemDto
@@ -933,8 +951,10 @@ app.MapGet("/driver/rides/{id}", async (string id, HttpContext context, IBooking
     }
     else
     {
-        // Unspecified or Local - treat as already in correct timezone
-        pickupOffset = new DateTimeOffset(booking.PickupDateTime, driverTz.GetUtcOffset(booking.PickupDateTime));
+        // Local or Unspecified - treat as already in correct timezone
+        // Must convert to Unspecified to avoid offset mismatch
+        var unspecified = DateTime.SpecifyKind(booking.PickupDateTime, DateTimeKind.Unspecified);
+        pickupOffset = new DateTimeOffset(unspecified, driverTz.GetUtcOffset(unspecified));
     }
 
     var detail = new DriverRideDetailDto

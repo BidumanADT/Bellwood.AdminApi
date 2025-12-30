@@ -1,7 +1,243 @@
 [
   {
-    "Id": "c72deabb7d8c44e8aefbdcf7e474ced0",
-    "CreatedUtc": "2025-12-20T14:19:38.1750038Z",
+    "Id": "503e69740e7840fc9d96471b5291dfba",
+    "CreatedUtc": "2025-12-30T13:59:14.144919Z",
+    "Status": "Requested",
+    "CancelledAt": null,
+    "AssignedDriverId": null,
+    "AssignedDriverUid": null,
+    "AssignedDriverName": null,
+    "CurrentRideStatus": null,
+    "BookerName": "Alice Morgan",
+    "PassengerName": "CreatedOnDateBugFix TestPax",
+    "VehicleClass": "Sedan",
+    "PickupLocation": "Home - 123 Wacker Dr, Chicago, IL",
+    "DropoffLocation": "O\u0027Hare - O\u0027Hare International Airport, Chicago, IL",
+    "PickupDateTime": "2025-12-30T09:28:35.2751442-05:00",
+    "Draft": {
+      "Booker": {
+        "FirstName": "Alice",
+        "LastName": "Morgan",
+        "PhoneNumber": "312-555-7777",
+        "EmailAddress": "alice.morgan@example.com"
+      },
+      "Passenger": {
+        "FirstName": "CreatedOnDateBugFix",
+        "LastName": "TestPax",
+        "PhoneNumber": "",
+        "EmailAddress": ""
+      },
+      "AdditionalPassengers": [],
+      "VehicleClass": "Sedan",
+      "PickupDateTime": "2025-12-30T09:28:35.2751442-05:00",
+      "PickupLocation": "Home - 123 Wacker Dr, Chicago, IL",
+      "PickupStyle": "Curbside",
+      "PickupSignText": null,
+      "ReturnPickupStyle": null,
+      "ReturnPickupSignText": null,
+      "AsDirected": false,
+      "Hours": null,
+      "DropoffLocation": "O\u0027Hare - O\u0027Hare International Airport, Chicago, IL",
+      "RoundTrip": false,
+      "ReturnPickupTime": null,
+      "OutboundFlight": {
+        "FlightNumber": null,
+        "TailNumber": null
+      },
+      "ReturnFlight": null,
+      "PassengerCount": 1,
+      "CheckedBags": 0,
+      "CarryOnBags": 0,
+      "CapacityWithinLimits": true,
+      "CapacityNote": null,
+      "SuggestedVehicle": null,
+      "CapacityOverrideByUser": false,
+      "AdditionalRequest": null,
+      "AdditionalRequestOtherText": null,
+      "PaymentMethodId": "pm_visa4242",
+      "PaymentMethodLast4": "4242"
+    }
+  },
+  {
+    "Id": "b8783a84b0534a11a0e700d0e8755bc5",
+    "CreatedUtc": "2025-12-30T13:54:24.3784975Z",
+    "Status": "Requested",
+    "CancelledAt": null,
+    "AssignedDriverId": null,
+    "AssignedDriverUid": null,
+    "AssignedDriverName": null,
+    "CurrentRideStatus": null,
+    "BookerName": "Alice Morgan",
+    "PassengerName": "Alice Morgan",
+    "VehicleClass": "Sedan",
+    "PickupLocation": "Home - 123 Wacker Dr, Chicago, IL",
+    "DropoffLocation": "Langham - 330 N Wabash Ave, Chicago, IL",
+    "PickupDateTime": "2025-12-30T09:23:54.6938103-05:00",
+    "Draft": {
+      "Booker": {
+        "FirstName": "Alice",
+        "LastName": "Morgan",
+        "PhoneNumber": "312-555-7777",
+        "EmailAddress": "alice.morgan@example.com"
+      },
+      "Passenger": {
+        "FirstName": "Alice",
+        "LastName": "Morgan",
+        "PhoneNumber": "",
+        "EmailAddress": ""
+      },
+      "AdditionalPassengers": [],
+      "VehicleClass": "Sedan",
+      "PickupDateTime": "2025-12-30T09:23:54.6938103-05:00",
+      "PickupLocation": "Home - 123 Wacker Dr, Chicago, IL",
+      "PickupStyle": "Curbside",
+      "PickupSignText": null,
+      "ReturnPickupStyle": null,
+      "ReturnPickupSignText": null,
+      "AsDirected": false,
+      "Hours": null,
+      "DropoffLocation": "Langham - 330 N Wabash Ave, Chicago, IL",
+      "RoundTrip": false,
+      "ReturnPickupTime": null,
+      "OutboundFlight": {
+        "FlightNumber": null,
+        "TailNumber": null
+      },
+      "ReturnFlight": null,
+      "PassengerCount": 1,
+      "CheckedBags": 0,
+      "CarryOnBags": 0,
+      "CapacityWithinLimits": true,
+      "CapacityNote": null,
+      "SuggestedVehicle": null,
+      "CapacityOverrideByUser": false,
+      "AdditionalRequest": null,
+      "AdditionalRequestOtherText": null,
+      "PaymentMethodId": "pm_visa4242",
+      "PaymentMethodLast4": "4242"
+    }
+  },
+  {
+    "Id": "ddad04affb20476b91bebde7c0f97c90",
+    "CreatedUtc": "2025-12-30T13:41:25.9030294Z",
+    "Status": "Requested",
+    "CancelledAt": null,
+    "AssignedDriverId": null,
+    "AssignedDriverUid": null,
+    "AssignedDriverName": null,
+    "CurrentRideStatus": null,
+    "BookerName": "Alice Morgan",
+    "PassengerName": "UtcConvBugFix TestPax",
+    "VehicleClass": "Sedan",
+    "PickupLocation": "456 Mission St - 456 Mission St, San Francisco, CA 94105, USA",
+    "DropoffLocation": "Home - 123 Wacker Dr, Chicago, IL",
+    "PickupDateTime": "2025-12-30T09:10:16.9393871-05:00",
+    "Draft": {
+      "Booker": {
+        "FirstName": "Alice",
+        "LastName": "Morgan",
+        "PhoneNumber": "312-555-7777",
+        "EmailAddress": "alice.morgan@example.com"
+      },
+      "Passenger": {
+        "FirstName": "UtcConvBugFix",
+        "LastName": "TestPax",
+        "PhoneNumber": "",
+        "EmailAddress": ""
+      },
+      "AdditionalPassengers": [],
+      "VehicleClass": "Sedan",
+      "PickupDateTime": "2025-12-30T09:10:16.9393871-05:00",
+      "PickupLocation": "456 Mission St - 456 Mission St, San Francisco, CA 94105, USA",
+      "PickupStyle": "Curbside",
+      "PickupSignText": null,
+      "ReturnPickupStyle": null,
+      "ReturnPickupSignText": null,
+      "AsDirected": false,
+      "Hours": null,
+      "DropoffLocation": "Home - 123 Wacker Dr, Chicago, IL",
+      "RoundTrip": false,
+      "ReturnPickupTime": null,
+      "OutboundFlight": {
+        "FlightNumber": null,
+        "TailNumber": null
+      },
+      "ReturnFlight": null,
+      "PassengerCount": 1,
+      "CheckedBags": 0,
+      "CarryOnBags": 0,
+      "CapacityWithinLimits": true,
+      "CapacityNote": null,
+      "SuggestedVehicle": null,
+      "CapacityOverrideByUser": false,
+      "AdditionalRequest": null,
+      "AdditionalRequestOtherText": null,
+      "PaymentMethodId": "pm_visa4242",
+      "PaymentMethodLast4": "4242"
+    }
+  },
+  {
+    "Id": "8642dfdd25264cfd95dbc826a80fd885",
+    "CreatedUtc": "2025-12-30T12:44:09.7338454Z",
+    "Status": "Requested",
+    "CancelledAt": null,
+    "AssignedDriverId": null,
+    "AssignedDriverUid": null,
+    "AssignedDriverName": null,
+    "CurrentRideStatus": null,
+    "BookerName": "Alice Morgan",
+    "PassengerName": "BookLocAutocomp TestPax",
+    "VehicleClass": "Sedan",
+    "PickupLocation": "123 Main St - 123 Main St, San Francisco, CA 94105, USA",
+    "DropoffLocation": "789 Morse Ave - 789 Morse Ave, Sunnyvale, CA 94085, USA",
+    "PickupDateTime": "2025-12-30T08:12:57.7837119-05:00",
+    "Draft": {
+      "Booker": {
+        "FirstName": "Alice",
+        "LastName": "Morgan",
+        "PhoneNumber": "312-555-7777",
+        "EmailAddress": "alice.morgan@example.com"
+      },
+      "Passenger": {
+        "FirstName": "BookLocAutocomp",
+        "LastName": "TestPax",
+        "PhoneNumber": "",
+        "EmailAddress": ""
+      },
+      "AdditionalPassengers": [],
+      "VehicleClass": "Sedan",
+      "PickupDateTime": "2025-12-30T08:12:57.7837119-05:00",
+      "PickupLocation": "123 Main St - 123 Main St, San Francisco, CA 94105, USA",
+      "PickupStyle": "Curbside",
+      "PickupSignText": null,
+      "ReturnPickupStyle": null,
+      "ReturnPickupSignText": null,
+      "AsDirected": false,
+      "Hours": null,
+      "DropoffLocation": "789 Morse Ave - 789 Morse Ave, Sunnyvale, CA 94085, USA",
+      "RoundTrip": false,
+      "ReturnPickupTime": null,
+      "OutboundFlight": {
+        "FlightNumber": null,
+        "TailNumber": null
+      },
+      "ReturnFlight": null,
+      "PassengerCount": 1,
+      "CheckedBags": 0,
+      "CarryOnBags": 0,
+      "CapacityWithinLimits": true,
+      "CapacityNote": null,
+      "SuggestedVehicle": null,
+      "CapacityOverrideByUser": false,
+      "AdditionalRequest": null,
+      "AdditionalRequestOtherText": null,
+      "PaymentMethodId": "pm_visa4242",
+      "PaymentMethodLast4": "4242"
+    }
+  },
+  {
+    "Id": "d8b5b85b95cf4b67b1ca1240afcad2e9",
+    "CreatedUtc": "2025-12-25T12:45:53.1804215Z",
     "Status": "NoShow",
     "CancelledAt": null,
     "AssignedDriverId": "TBD-driver-id",
@@ -13,7 +249,7 @@
     "VehicleClass": "SUV",
     "PickupLocation": "Union Station",
     "DropoffLocation": "O\u0027Hare Airport",
-    "PickupDateTime": "2025-12-20T16:19:38.1750038Z",
+    "PickupDateTime": "2025-12-25T14:45:53.1804215Z",
     "Draft": {
       "Booker": {
         "FirstName": "Robert",
@@ -29,7 +265,7 @@
       },
       "AdditionalPassengers": [],
       "VehicleClass": "SUV",
-      "PickupDateTime": "2025-12-20T16:19:38.1750038Z",
+      "PickupDateTime": "2025-12-25T14:45:53.1804215Z",
       "PickupLocation": "Union Station",
       "PickupStyle": "Curbside",
       "PickupSignText": null,
@@ -59,10 +295,10 @@
     }
   },
   {
-    "Id": "c4b4e6c2fcf24f98a957f05ee941f7a0",
-    "CreatedUtc": "2025-12-21T14:19:38.1750038Z",
+    "Id": "6e5c7fbe49f142549d702d65ebd40cd1",
+    "CreatedUtc": "2025-12-26T12:45:53.1804215Z",
     "Status": "Cancelled",
-    "CancelledAt": "2025-12-21T15:19:38.1750038Z",
+    "CancelledAt": "2025-12-26T13:45:53.1804215Z",
     "AssignedDriverId": "TBD-driver-id",
     "AssignedDriverUid": "driver-003",
     "AssignedDriverName": "Robert Brown",
@@ -72,7 +308,7 @@
     "VehicleClass": "Sedan",
     "PickupLocation": "Midway Airport",
     "DropoffLocation": "Naperville",
-    "PickupDateTime": "2025-12-21T17:19:38.1750038Z",
+    "PickupDateTime": "2025-12-26T15:45:53.1804215Z",
     "Draft": {
       "Booker": {
         "FirstName": "Michael",
@@ -88,7 +324,7 @@
       },
       "AdditionalPassengers": [],
       "VehicleClass": "Sedan",
-      "PickupDateTime": "2025-12-21T17:19:38.1750038Z",
+      "PickupDateTime": "2025-12-26T15:45:53.1804215Z",
       "PickupLocation": "Midway Airport",
       "PickupStyle": "Curbside",
       "PickupSignText": null,
@@ -118,8 +354,8 @@
     }
   },
   {
-    "Id": "14d1cf374ce3409c87e44b19f3edff8c",
-    "CreatedUtc": "2025-12-22T14:19:38.1750038Z",
+    "Id": "f506abe28ae5490c9b638a93fec6f81f",
+    "CreatedUtc": "2025-12-27T12:45:53.1804215Z",
     "Status": "Completed",
     "CancelledAt": null,
     "AssignedDriverId": "TBD-driver-id",
@@ -131,7 +367,7 @@
     "VehicleClass": "S-Class",
     "PickupLocation": "O\u0027Hare International",
     "DropoffLocation": "Navy Pier",
-    "PickupDateTime": "2025-12-22T16:19:38.1750038Z",
+    "PickupDateTime": "2025-12-27T14:45:53.1804215Z",
     "Draft": {
       "Booker": {
         "FirstName": "Lisa",
@@ -147,7 +383,7 @@
       },
       "AdditionalPassengers": [],
       "VehicleClass": "S-Class",
-      "PickupDateTime": "2025-12-22T16:19:38.1750038Z",
+      "PickupDateTime": "2025-12-27T14:45:53.1804215Z",
       "PickupLocation": "O\u0027Hare International",
       "PickupStyle": "Curbside",
       "PickupSignText": null,
@@ -177,8 +413,8 @@
     }
   },
   {
-    "Id": "1a6e4663e00f44e2940fa4397174288d",
-    "CreatedUtc": "2025-12-23T13:19:38.1750038Z",
+    "Id": "ba54e78a3d854b44981b6ddbbb1926f3",
+    "CreatedUtc": "2025-12-28T11:45:53.1804215Z",
     "Status": "InProgress",
     "CancelledAt": null,
     "AssignedDriverId": "TBD-driver-id",
@@ -190,7 +426,7 @@
     "VehicleClass": "SUV",
     "PickupLocation": "O\u0027Hare FBO",
     "DropoffLocation": "Downtown Chicago",
-    "PickupDateTime": "2025-12-23T13:49:38.1750038Z",
+    "PickupDateTime": "2025-12-28T12:15:53.1804215Z",
     "Draft": {
       "Booker": {
         "FirstName": "Alice",
@@ -206,7 +442,7 @@
       },
       "AdditionalPassengers": [],
       "VehicleClass": "SUV",
-      "PickupDateTime": "2025-12-23T13:49:38.1750038Z",
+      "PickupDateTime": "2025-12-28T12:15:53.1804215Z",
       "PickupLocation": "O\u0027Hare FBO",
       "PickupStyle": "MeetAndGreet",
       "PickupSignText": "REED / Bellwood",
@@ -236,8 +472,8 @@
     }
   },
   {
-    "Id": "905057f0746544b3af8f5c7bfeac19b4",
-    "CreatedUtc": "2025-12-23T14:16:38.1750038Z",
+    "Id": "6e134cfcb53a4903b4c7af75440b044c",
+    "CreatedUtc": "2025-12-28T12:42:53.1804215Z",
     "Status": "Scheduled",
     "CancelledAt": null,
     "AssignedDriverId": "TBD-driver-id",
@@ -249,7 +485,7 @@
     "VehicleClass": "S-Class",
     "PickupLocation": "O\u0027Hare FBO",
     "DropoffLocation": "Peninsula Hotel, Chicago",
-    "PickupDateTime": "2025-12-25T14:19:38.1750038Z",
+    "PickupDateTime": "2025-12-30T12:45:53.1804215Z",
     "Draft": {
       "Booker": {
         "FirstName": "David",
@@ -265,7 +501,7 @@
       },
       "AdditionalPassengers": [],
       "VehicleClass": "S-Class",
-      "PickupDateTime": "2025-12-25T14:19:38.1750038Z",
+      "PickupDateTime": "2025-12-30T12:45:53.1804215Z",
       "PickupLocation": "O\u0027Hare FBO",
       "PickupStyle": "MeetAndGreet",
       "PickupSignText": "WATSON / Bellwood",
@@ -295,20 +531,20 @@
     }
   },
   {
-    "Id": "ebf57dbe2e1e49b0a97569629a681aa6",
-    "CreatedUtc": "2025-12-23T14:14:38.1750038Z",
+    "Id": "10b8a918836c44cda938a8e59c65735d",
+    "CreatedUtc": "2025-12-28T12:40:53.1804215Z",
     "Status": "Scheduled",
     "CancelledAt": null,
     "AssignedDriverId": "TBD-driver-id",
     "AssignedDriverUid": "driver-001",
     "AssignedDriverName": "Charlie Johnson",
-    "CurrentRideStatus": "OnRoute",
+    "CurrentRideStatus": "Scheduled",
     "BookerName": "Chris Bailey",
     "PassengerName": "Jordan Chen",
     "VehicleClass": "Sedan",
     "PickupLocation": "Langham Hotel",
     "DropoffLocation": "Midway Airport",
-    "PickupDateTime": "2025-12-23T19:19:38.1750038Z",
+    "PickupDateTime": "2025-12-28T17:45:53.1804215Z",
     "Draft": {
       "Booker": {
         "FirstName": "Chris",
@@ -324,7 +560,7 @@
       },
       "AdditionalPassengers": [],
       "VehicleClass": "Sedan",
-      "PickupDateTime": "2025-12-23T19:19:38.1750038Z",
+      "PickupDateTime": "2025-12-28T17:45:53.1804215Z",
       "PickupLocation": "Langham Hotel",
       "PickupStyle": "Curbside",
       "PickupSignText": null,
@@ -354,8 +590,8 @@
     }
   },
   {
-    "Id": "dbe4cb966a59441b9a015e979082da02",
-    "CreatedUtc": "2025-12-23T13:59:38.1750038Z",
+    "Id": "ddf1ed13adfe4101a479205a297537de",
+    "CreatedUtc": "2025-12-28T12:25:53.1804215Z",
     "Status": "Confirmed",
     "CancelledAt": null,
     "AssignedDriverId": null,
@@ -367,7 +603,7 @@
     "VehicleClass": "SUV",
     "PickupLocation": "Navy Pier",
     "DropoffLocation": "Midway Airport",
-    "PickupDateTime": "2025-12-25T02:19:38.1750038Z",
+    "PickupDateTime": "2025-12-30T00:45:53.1804215Z",
     "Draft": {
       "Booker": {
         "FirstName": "James",
@@ -383,7 +619,7 @@
       },
       "AdditionalPassengers": [],
       "VehicleClass": "SUV",
-      "PickupDateTime": "2025-12-25T02:19:38.1750038Z",
+      "PickupDateTime": "2025-12-30T00:45:53.1804215Z",
       "PickupLocation": "Navy Pier",
       "PickupStyle": "Curbside",
       "PickupSignText": null,
@@ -413,8 +649,8 @@
     }
   },
   {
-    "Id": "283d4e61b5944650abedcec360417687",
-    "CreatedUtc": "2025-12-23T14:09:38.1750038Z",
+    "Id": "bcb07555237741f1addd79b1f32d3a88",
+    "CreatedUtc": "2025-12-28T12:35:53.1804215Z",
     "Status": "Requested",
     "CancelledAt": null,
     "AssignedDriverId": null,
@@ -426,7 +662,7 @@
     "VehicleClass": "Sedan",
     "PickupLocation": "Union Station, Chicago",
     "DropoffLocation": "Willis Tower",
-    "PickupDateTime": "2025-12-24T14:19:38.1750038Z",
+    "PickupDateTime": "2025-12-29T12:45:53.1804215Z",
     "Draft": {
       "Booker": {
         "FirstName": "Tom",
@@ -442,7 +678,7 @@
       },
       "AdditionalPassengers": [],
       "VehicleClass": "Sedan",
-      "PickupDateTime": "2025-12-24T14:19:38.1750038Z",
+      "PickupDateTime": "2025-12-29T12:45:53.1804215Z",
       "PickupLocation": "Union Station, Chicago",
       "PickupStyle": "Curbside",
       "PickupSignText": null,
