@@ -38,6 +38,29 @@ public sealed class BookingRecord
     public BookingStatus Status { get; set; } = BookingStatus.Requested;
     public DateTime? CancelledAt { get; set; }
 
+    // =====================================================================
+    // OWNERSHIP & AUDIT FIELDS (Phase 1 - User Data Access Enforcement)
+    // =====================================================================
+    
+    /// <summary>
+    /// The user ID (uid claim from JWT) of the user who created this booking.
+    /// Nullable for backward compatibility with existing records.
+    /// Used to enforce per-user data isolation for bookers/passengers.
+    /// </summary>
+    public string? CreatedByUserId { get; set; }
+    
+    /// <summary>
+    /// The user ID of the last user who modified this booking.
+    /// Populated on updates for audit trail purposes.
+    /// </summary>
+    public string? ModifiedByUserId { get; set; }
+    
+    /// <summary>
+    /// Timestamp of the last modification to this booking.
+    /// Populated on updates for audit trail purposes.
+    /// </summary>
+    public DateTime? ModifiedOnUtc { get; set; }
+
     // Driver assignment (both IDs for different purposes)
     public string? AssignedDriverId { get; set; }      // Links to Driver entity
     public string? AssignedDriverUid { get; set; }     // Links to AuthServer UID for driver app

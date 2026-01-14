@@ -10,6 +10,9 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 
+// Phase 1: Use static import for authorization helper methods
+using static Bellwood.AdminApi.Services.UserAuthorizationHelper;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // ===================================================================
@@ -195,9 +198,12 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 // ===================================================================
 
 // POST /quotes/seed - Seed sample quotes (DEV ONLY)
-app.MapPost("/quotes/seed", async (IQuoteRepository repo) =>
+app.MapPost("/quotes/seed", async (HttpContext context, IQuoteRepository repo) =>
 {
     var now = DateTime.UtcNow;
+    
+    // Phase 1: Capture the authenticated user's ID for seed data
+    var createdByUserId = GetUserId(context.User);
 
     var samples = new[]
     {
@@ -221,7 +227,9 @@ app.MapPost("/quotes/seed", async (IQuoteRepository repo) =>
                 DropoffLocation = "O'Hare International Airport",
                 RoundTrip = false,
                 PassengerCount = 2, CheckedBags = 2, CarryOnBags = 1
-            }
+            },
+            // Phase 1: Set ownership on seeded data
+            CreatedByUserId = createdByUserId
         },
         new QuoteRecord {
             CreatedUtc = now.AddMinutes(-10),
@@ -242,7 +250,8 @@ app.MapPost("/quotes/seed", async (IQuoteRepository repo) =>
                 PickupSignText = "CHEN / Bellwood",
                 DropoffLocation = "Downtown Chicago",
                 PassengerCount = 3, CheckedBags = 3, CarryOnBags = 2
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         new QuoteRecord {
             CreatedUtc = now.AddHours(-1),
@@ -262,7 +271,8 @@ app.MapPost("/quotes/seed", async (IQuoteRepository repo) =>
                 PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "The Langham Hotel",
                 PassengerCount = 2
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         new QuoteRecord {
             CreatedUtc = now.AddHours(-2),
@@ -283,7 +293,8 @@ app.MapPost("/quotes/seed", async (IQuoteRepository repo) =>
                 PickupSignText = "PARK / Bellwood",
                 DropoffLocation = "Indiana Dunes State Park",
                 PassengerCount = 6, CheckedBags = 4, CarryOnBags = 6
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         new QuoteRecord {
             CreatedUtc = now.AddHours(-3),
@@ -303,14 +314,18 @@ app.MapPost("/quotes/seed", async (IQuoteRepository repo) =>
                 PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "Langham Hotel",
                 PassengerCount = 4
-            }
+            },
+            CreatedByUserId = createdByUserId
         }
     };
 
     foreach (var r in samples)
         await repo.AddAsync(r);
 
-    return Results.Ok(new { added = samples.Length });
+    return Results.Ok(new { 
+        added = samples.Length,
+        createdByUserId = createdByUserId ?? "(null - legacy data)"
+    });
 })
 .WithName("SeedQuotes")
 .RequireAuthorization();
@@ -318,6 +333,7 @@ app.MapPost("/quotes/seed", async (IQuoteRepository repo) =>
 // POST /quotes - Submit a new quote request
 app.MapPost("/quotes", async (
     [FromBody] QuoteDraft draft,
+    HttpContext context,
     IEmailSender email,
     IQuoteRepository repo,
     ILoggerFactory loggerFactory) =>
@@ -327,6 +343,9 @@ app.MapPost("/quotes", async (
     if (draft is null || string.IsNullOrWhiteSpace(draft.PickupLocation))
         return Results.BadRequest(new { error = "Invalid payload" });
 
+    // Phase 1: Capture the user who created this quote for ownership tracking
+    var currentUserId = GetUserId(context.User);
+
     var rec = new QuoteRecord
     {
         BookerName = draft.Booker?.ToString() ?? "",
@@ -335,7 +354,9 @@ app.MapPost("/quotes", async (
         PickupLocation = draft.PickupLocation,
         DropoffLocation = draft.DropoffLocation,
         PickupDateTime = draft.PickupDateTime,
-        Draft = draft
+        Draft = draft,
+        // Phase 1: Set ownership field
+        CreatedByUserId = currentUserId
     };
 
     await repo.AddAsync(rec);
@@ -343,7 +364,8 @@ app.MapPost("/quotes", async (
     try
     {
         await email.SendQuoteAsync(draft, rec.Id);
-        log.LogInformation("Quote {Id} submitted for {Passenger}", rec.Id, rec.PassengerName);
+        log.LogInformation("Quote {Id} submitted for {Passenger} by user {UserId}", 
+            rec.Id, rec.PassengerName, currentUserId ?? "unknown");
     }
     catch (Exception ex)
     {
@@ -357,12 +379,34 @@ app.MapPost("/quotes", async (
 .RequireAuthorization();
 
 // GET /quotes/list - List recent quotes (paginated)
-app.MapGet("/quotes/list", async ([FromQuery] int take, IQuoteRepository repo) =>
+app.MapGet("/quotes/list", async ([FromQuery] int take, HttpContext context, IQuoteRepository repo) =>
 {
     take = (take <= 0 || take > 200) ? 50 : take;
     var rows = await repo.ListAsync(take);
 
-    var list = rows.Select(r => new {
+    // Phase 1: Filter quotes based on user role
+    // - Staff (admin/dispatcher): See all quotes
+    // - Bookers: Only see quotes they created
+    // - Drivers: See no quotes (they don't use this endpoint)
+    var user = context.User;
+    var currentUserId = GetUserId(user);
+    
+    IEnumerable<QuoteRecord> filteredRows;
+    if (IsStaffOrAdmin(user))
+    {
+        // Staff sees all quotes
+        filteredRows = rows;
+    }
+    else
+    {
+        // Non-staff users only see their own quotes
+        // Legacy records (null CreatedByUserId) are hidden from non-staff
+        filteredRows = rows.Where(r => 
+            !string.IsNullOrEmpty(r.CreatedByUserId) && 
+            r.CreatedByUserId == currentUserId);
+    }
+
+    var list = filteredRows.Select(r => new {
         r.Id,
         r.CreatedUtc,
         r.Status,
@@ -380,10 +424,44 @@ app.MapGet("/quotes/list", async ([FromQuery] int take, IQuoteRepository repo) =
 .RequireAuthorization();
 
 // GET /quotes/{id} - Get detailed quote by ID
-app.MapGet("/quotes/{id}", async (string id, IQuoteRepository repo) =>
+app.MapGet("/quotes/{id}", async (string id, HttpContext context, IQuoteRepository repo) =>
 {
     var rec = await repo.GetAsync(id);
-    return rec is null ? Results.NotFound() : Results.Ok(rec);
+    if (rec is null) 
+        return Results.NotFound();
+    
+    // Phase 1: Verify user has access to this quote
+    // - Staff (admin/dispatcher): Full access
+    // - Bookers: Only their own quotes (CreatedByUserId match)
+    // - Drivers: No access to quotes
+    var user = context.User;
+    
+    // FIX: Staff can access all records (including legacy)
+    if (!IsStaffOrAdmin(user))
+    {
+        // Non-staff: Must check ownership
+        var currentUserId = GetUserId(user);
+        
+        // Legacy records (null CreatedByUserId) are not accessible to non-staff
+        if (string.IsNullOrEmpty(rec.CreatedByUserId))
+        {
+            return Results.Problem(
+                statusCode: 403,
+                title: "Forbidden",
+                detail: "You do not have permission to view this quote");
+        }
+        
+        // Check if user owns this record
+        if (rec.CreatedByUserId != currentUserId)
+        {
+            return Results.Problem(
+                statusCode: 403,
+                title: "Forbidden",
+                detail: "You do not have permission to view this quote");
+        }
+    }
+    
+    return Results.Ok(rec);
 })
 .WithName("GetQuote")
 .RequireAuthorization();
@@ -393,9 +471,12 @@ app.MapGet("/quotes/{id}", async (string id, IQuoteRepository repo) =>
 // ===================================================================
 
 // POST /bookings/seed - Seed sample bookings (DEV ONLY)
-app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
+app.MapPost("/bookings/seed", async (HttpContext context, IBookingRepository repo) =>
 {
     var now = DateTime.UtcNow;
+    
+    // Phase 1: Capture the authenticated user's ID for seed data
+    var createdByUserId = GetUserId(context.User);
 
     var samples = new[]
     {
@@ -418,7 +499,8 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
                 PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "Willis Tower",
                 PassengerCount = 1, CheckedBags = 1, CarryOnBags = 1
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         // Confirmed - Staff approved booking
         new BookingRecord {
@@ -439,7 +521,8 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
                 PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "Midway Airport",
                 PassengerCount = 3, CheckedBags = 3, CarryOnBags = 2
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         // Scheduled - Charlie's first ride (5 hours from now)
         new BookingRecord {
@@ -464,7 +547,8 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
                 PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "Midway Airport",
                 PassengerCount = 1, CheckedBags = 1
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         // Scheduled - Charlie's second ride (48 hours from now)
         new BookingRecord {
@@ -490,7 +574,8 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
                 PickupSignText = "WATSON / Bellwood",
                 DropoffLocation = "Peninsula Hotel, Chicago",
                 PassengerCount = 2, CheckedBags = 2, CarryOnBags = 1
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         // InProgress - Driver has picked up passenger
         new BookingRecord {
@@ -516,7 +601,8 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
                 PickupSignText = "REED / Bellwood",
                 DropoffLocation = "Downtown Chicago",
                 PassengerCount = 2, CheckedBags = 2, CarryOnBags = 2
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         // Completed - Ride finished successfully
         new BookingRecord {
@@ -541,7 +627,8 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
                 PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "Navy Pier",
                 PassengerCount = 2
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         // Cancelled - Booking was cancelled
         new BookingRecord {
@@ -567,7 +654,8 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
                 PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "Naperville",
                 PassengerCount = 1
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         // NoShow - Passenger didn't show up
         new BookingRecord {
@@ -592,14 +680,18 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
                 PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "O'Hare Airport",
                 PassengerCount = 2
-            }
+            },
+            CreatedByUserId = createdByUserId  // FIX: Add missing ownership field
         }
     };
 
     foreach (var r in samples)
         await repo.AddAsync(r);
 
-    return Results.Ok(new { added = samples.Length });
+    return Results.Ok(new { 
+        added = samples.Length,
+        createdByUserId = createdByUserId ?? "(null - legacy data)"  // FIX: Add to response
+    });
 })
 .WithName("SeedBookings")
 .RequireAuthorization();
@@ -607,6 +699,7 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
 // POST /bookings - Submit a new booking request
 app.MapPost("/bookings", async (
     [FromBody] QuoteDraft draft,
+    HttpContext context,
     IEmailSender email,
     IBookingRepository repo,
     ILoggerFactory loggerFactory) =>
@@ -616,6 +709,9 @@ app.MapPost("/bookings", async (
     if (draft is null || string.IsNullOrWhiteSpace(draft.PickupLocation))
         return Results.BadRequest(new { error = "Invalid payload" });
 
+    // Phase 1: Capture the user who created this booking for ownership tracking
+    var currentUserId = GetUserId(context.User);
+
     var rec = new BookingRecord
     {
         BookerName = draft.Booker?.ToString() ?? "",
@@ -624,7 +720,9 @@ app.MapPost("/bookings", async (
         PickupLocation = draft.PickupLocation,
         DropoffLocation = draft.DropoffLocation,
         PickupDateTime = draft.PickupDateTime,
-        Draft = draft
+        Draft = draft,
+        // Phase 1: Set ownership field
+        CreatedByUserId = currentUserId
     };
 
     await repo.AddAsync(rec);
@@ -632,7 +730,8 @@ app.MapPost("/bookings", async (
     try
     {
         await email.SendBookingAsync(draft, rec.Id);
-        log.LogInformation("Booking {Id} submitted for {Passenger}", rec.Id, rec.PassengerName);
+        log.LogInformation("Booking {Id} submitted for {Passenger} by user {UserId}", 
+            rec.Id, rec.PassengerName, currentUserId ?? "unknown");
     }
     catch (Exception ex)
     {
@@ -651,11 +750,42 @@ app.MapGet("/bookings/list", async ([FromQuery] int take, HttpContext context, I
     take = (take <= 0 || take > 200) ? 50 : take;
     var rows = await repo.ListAsync(take);
     
+    // Phase 1: Filter bookings based on user role
+    // - Staff (admin/dispatcher): See all bookings
+    // - Drivers: See only bookings assigned to them
+    // - Bookers: Only see bookings they created
+    var user = context.User;
+    var currentUserId = GetUserId(user);
+    
+    IEnumerable<BookingRecord> filteredRows;
+    if (IsStaffOrAdmin(user))
+    {
+        // Staff sees all bookings
+        filteredRows = rows;
+    }
+    else if (IsDriver(user))
+    {
+        // Drivers see only their assigned bookings
+        // Note: Drivers should use /driver/rides/today instead, but this is a safety measure
+        var driverUid = user.FindFirst("uid")?.Value;
+        filteredRows = rows.Where(r => 
+            !string.IsNullOrEmpty(r.AssignedDriverUid) && 
+            r.AssignedDriverUid == driverUid);
+    }
+    else
+    {
+        // Bookers only see their own bookings
+        // Legacy records (null CreatedByUserId) are hidden from non-staff
+        filteredRows = rows.Where(r => 
+            !string.IsNullOrEmpty(r.CreatedByUserId) && 
+            r.CreatedByUserId == currentUserId);
+    }
+    
     // Get user's timezone for PickupDateTimeOffset conversion
     // Default to Central Time for admin users who don't send X-Timezone-Id header
     var userTz = GetRequestTimeZone(context);
 
-    var list = rows.Select(r =>
+    var list = filteredRows.Select(r =>
     {
         // FIX: Handle DateTime.Kind for PickupDateTimeOffset
         DateTimeOffset pickupOffset;
@@ -709,6 +839,20 @@ app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepo
 {
     var rec = await repo.GetAsync(id);
     if (rec is null) return Results.NotFound();
+    
+    // Phase 1: Verify user has access to this booking
+    // - Staff (admin/dispatcher): Full access
+    // - Drivers: Only their assigned bookings
+    // - Bookers: Only their own bookings (CreatedByUserId match)
+    var user = context.User;
+    
+    if (!CanAccessBooking(user, rec.CreatedByUserId, rec.AssignedDriverUid))
+    {
+        return Results.Problem(
+            statusCode: 403,
+            title: "Forbidden",
+            detail: "You do not have permission to view this booking");
+    }
     
     // Get user's timezone for PickupDateTimeOffset conversion
     var userTz = GetRequestTimeZone(context);
@@ -765,16 +909,33 @@ app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepo
 // POST /bookings/{id}/cancel - Cancel a booking request
 app.MapPost("/bookings/{id}/cancel", async (
     string id,
+    HttpContext context,
     IBookingRepository repo,
     IEmailSender email,
     ILoggerFactory loggerFactory) =>
 {
     var log = loggerFactory.CreateLogger("bookings");
+    var user = context.User;
+    var currentUserId = GetUserId(user);
 
     // Find booking
     var booking = await repo.GetAsync(id);
     if (booking is null)
         return Results.NotFound(new { error = "Booking not found" });
+
+    // Phase 1: Verify user has permission to cancel this booking
+    // - Staff (admin/dispatcher): Can cancel any booking
+    // - Bookers: Can only cancel their own bookings
+    // - Drivers: Cannot cancel bookings (they use status updates instead)
+    if (!CanAccessRecord(user, booking.CreatedByUserId))
+    {
+        log.LogWarning("User {UserId} attempted to cancel booking {BookingId} they don't own", 
+            currentUserId, id);
+        return Results.Problem(
+            statusCode: 403,
+            title: "Forbidden",
+            detail: "You do not have permission to cancel this booking");
+    }
 
     // Only allow cancellation if status is Requested or Confirmed
     if (booking.Status != BookingStatus.Requested && booking.Status != BookingStatus.Confirmed)
@@ -782,16 +943,15 @@ app.MapPost("/bookings/{id}/cancel", async (
         return Results.BadRequest(new { error = $"Cannot cancel booking with status: {booking.Status}" });
     }
 
-    // Update status
-    booking.Status = BookingStatus.Cancelled;
-    booking.CancelledAt = DateTime.UtcNow;
-    await repo.UpdateStatusAsync(id, BookingStatus.Cancelled);
+    // Phase 1: Update status with audit trail (who cancelled and when)
+    await repo.UpdateStatusAsync(id, BookingStatus.Cancelled, currentUserId);
 
     // Send cancellation email
     try
     {
         await email.SendBookingCancellationAsync(booking.Draft, id, booking.BookerName);
-        log.LogInformation("Booking {Id} cancelled by {Booker}", id, booking.BookerName);
+        log.LogInformation("Booking {Id} cancelled by user {UserId} (booker: {Booker})", 
+            id, currentUserId, booking.BookerName);
     }
     catch (Exception ex)
     {
