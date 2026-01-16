@@ -147,8 +147,21 @@ builder.Services.AddAuthentication(options =>
 // Register authorization with driver policy:
 builder.Services.AddAuthorization(options =>
 {
+    // Phase 1: Driver policy
     options.AddPolicy("DriverOnly", policy =>
         policy.RequireRole("driver"));
+    
+    // Phase 2: Admin-only policy (sensitive operations)
+    options.AddPolicy("AdminOnly", policy =>
+        policy.RequireRole("admin"));
+    
+    // Phase 2: Staff policy (admin OR dispatcher - operational access)
+    options.AddPolicy("StaffOnly", policy =>
+        policy.RequireRole("admin", "dispatcher"));
+    
+    // Phase 2: Booker policy (optional - for future use)
+    options.AddPolicy("BookerOnly", policy =>
+        policy.RequireRole("booker"));
 });
 
 // CORS for development
@@ -328,7 +341,7 @@ app.MapPost("/quotes/seed", async (HttpContext context, IQuoteRepository repo) =
     });
 })
 .WithName("SeedQuotes")
-.RequireAuthorization();
+.RequireAuthorization("AdminOnly"); // Phase 2: Only admins can seed data
 
 // POST /quotes - Submit a new quote request
 app.MapPost("/quotes", async (
@@ -421,7 +434,7 @@ app.MapGet("/quotes/list", async ([FromQuery] int take, HttpContext context, IQu
     return Results.Ok(list);
 })
 .WithName("ListQuotes")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly"); // Phase 2: Changed from generic auth to StaffOnly
 
 // GET /quotes/{id} - Get detailed quote by ID
 app.MapGet("/quotes/{id}", async (string id, HttpContext context, IQuoteRepository repo) =>
@@ -461,10 +474,32 @@ app.MapGet("/quotes/{id}", async (string id, HttpContext context, IQuoteReposito
         }
     }
     
-    return Results.Ok(rec);
+    // Phase 2: Build response DTO with billing fields
+    var response = new QuoteDetailResponseDto
+    {
+        Id = rec.Id,
+        Status = rec.Status.ToString(),
+        CreatedUtc = rec.CreatedUtc,
+        BookerName = rec.BookerName,
+        PassengerName = rec.PassengerName,
+        VehicleClass = rec.VehicleClass,
+        PickupLocation = rec.PickupLocation,
+        DropoffLocation = rec.DropoffLocation,
+        PickupDateTime = rec.PickupDateTime,
+        Draft = rec.Draft,
+        
+        // Phase 2: Billing fields (currently null - will be populated in Phase 3+)
+        EstimatedCost = null,  // TODO: Populate when pricing integration added
+        BillingNotes = null    // TODO: Populate when billing notes added
+    };
+    
+    // Phase 2: Mask billing fields for dispatchers
+    MaskBillingFields(user, response);
+    
+    return Results.Ok(response);
 })
 .WithName("GetQuote")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly"); // Phase 2: Changed from generic auth to StaffOnly
 
 // ===================================================================
 // BOOKING ENDPOINTS
@@ -694,7 +729,7 @@ app.MapPost("/bookings/seed", async (HttpContext context, IBookingRepository rep
     });
 })
 .WithName("SeedBookings")
-.RequireAuthorization();
+.RequireAuthorization("AdminOnly"); // Phase 2: Only admins can seed data
 
 // POST /bookings - Submit a new booking request
 app.MapPost("/bookings", async (
@@ -753,7 +788,7 @@ app.MapGet("/bookings/list", async ([FromQuery] int take, HttpContext context, I
     // Phase 1: Filter bookings based on user role
     // - Staff (admin/dispatcher): See all bookings
     // - Drivers: See only bookings assigned to them
-    // - Bookers: Only see bookings they created
+    // - Bookers: Only see their own bookings
     var user = context.User;
     var currentUserId = GetUserId(user);
     
@@ -832,7 +867,7 @@ app.MapGet("/bookings/list", async ([FromQuery] int take, HttpContext context, I
     return Results.Ok(list);
 })
 .WithName("ListBookings")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly"); // Phase 2: Changed from generic auth to StaffOnly
 
 // GET /bookings/{id} - Get detailed booking by ID
 app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepository repo) =>
@@ -876,31 +911,41 @@ app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepo
     var createdLocal = TimeZoneInfo.ConvertTimeFromUtc(rec.CreatedUtc, userTz);
     var createdOffset = new DateTimeOffset(createdLocal, userTz.GetUtcOffset(createdLocal));
 
-    return Results.Ok(new
+    // Phase 2: Build response DTO with billing fields
+    var response = new BookingDetailResponseDto
     {
-        rec.Id,
-        rec.CreatedUtc, // Keep for backward compatibility
-        CreatedDateTimeOffset = createdOffset, // Add timezone-aware version
+        Id = rec.Id,
         Status = rec.Status.ToString(),
-        // FIX: Include CurrentRideStatus for real-time driver progress
         CurrentRideStatus = rec.CurrentRideStatus?.ToString(),
-        rec.BookerName,
-        rec.PassengerName,
-        rec.VehicleClass,
-        rec.PickupLocation,
-        rec.DropoffLocation,
-        // Keep old property for backward compatibility
-        rec.PickupDateTime,
-        // FIX: Add PickupDateTimeOffset for correct timezone display
-        PickupDateTimeOffset = pickupOffset,
-        rec.Draft,
+        CreatedUtc = rec.CreatedUtc, // Keep for backward compatibility
+        CreatedDateTimeOffset = createdOffset, // Timezone-aware version
+        BookerName = rec.BookerName,
+        PassengerName = rec.PassengerName,
+        VehicleClass = rec.VehicleClass,
+        PickupLocation = rec.PickupLocation,
+        DropoffLocation = rec.DropoffLocation,
+        PickupDateTime = rec.PickupDateTime, // Keep for backward compatibility
+        PickupDateTimeOffset = pickupOffset, // Timezone-aware version
+        Draft = rec.Draft,
         AssignedDriverId = rec.AssignedDriverId,
         AssignedDriverUid = rec.AssignedDriverUid,
-        AssignedDriverName = rec.AssignedDriverName ?? "Unassigned"
-    });
+        AssignedDriverName = rec.AssignedDriverName ?? "Unassigned",
+        
+        // Phase 2: Billing fields (currently null - will be populated in Phase 3+)
+        PaymentMethodId = null,      // TODO: Populate when Stripe/payment integration added
+        PaymentMethodLast4 = null,   // TODO: Populate when Stripe/payment integration added
+        PaymentAmount = null,        // TODO: Populate when pricing calculated
+        TotalAmount = null,          // TODO: Populate when final amount calculated
+        TotalFare = null             // TODO: Populate when final fare calculated
+    };
+    
+    // Phase 2: Mask billing fields for dispatchers
+    MaskBillingFields(user, response);
+
+    return Results.Ok(response);
 })
 .WithName("GetBooking")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly"); // Phase 2: Changed from generic auth to StaffOnly
 
 // ===================================================================
 // CANCEL ENDPOINTS
@@ -1463,7 +1508,7 @@ app.MapGet("/admin/locations", async (
     });
 })
 .WithName("GetAllActiveLocations")
-.RequireAuthorization(); // TODO: Add admin-only policy when ready
+.RequireAuthorization("StaffOnly"); // Phase 2: Both admin and dispatcher can view locations
 
 // GET /admin/locations/rides - Get locations for specific ride IDs (batch query)
 app.MapGet("/admin/locations/rides", async (
@@ -1510,7 +1555,7 @@ app.MapGet("/admin/locations/rides", async (
     });
 })
 .WithName("GetRideLocations")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly"); // Phase 2: Both admin and dispatcher can query locations
 
 // ===================================================================
 // AFFILIATE & DRIVER MANAGEMENT ENDPOINTS
@@ -1769,7 +1814,7 @@ app.MapPost("/bookings/{bookingId}/assign-driver", async (
     });
 })
 .WithName("AssignDriver")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly"); // Phase 2: Changed from generic auth to StaffOnly (both admin and dispatcher can assign)
 
 // POST /dev/seed-affiliates - Seed test affiliates and drivers (DEV ONLY)
 app.MapPost("/dev/seed-affiliates", async (
@@ -1849,8 +1894,9 @@ app.MapPost("/dev/seed-affiliates", async (
         note = "Driver 'Charlie Johnson' has UserUid 'driver-001' matching AuthServer test user 'charlie'"
     });
 })
-.WithName("SeedAffiliates");
-
+.WithName("SeedAffiliates")
+.RequireAuthorization("AdminOnly"); // Phase 2: Only admins can seed data (security best practice)
+ 
 // ===================================================================
 // APPLICATION START
 // ===================================================================

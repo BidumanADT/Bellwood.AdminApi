@@ -98,6 +98,56 @@ public static class UserAuthorizationHelper
     }
 
     // =====================================================================
+    // Phase 2: DISPATCHER ROLE & FIELD MASKING
+    // =====================================================================
+
+    /// <summary>
+    /// Check if the user is a dispatcher (operational staff with limited access).
+    /// Dispatchers can see all operational data but NOT billing information.
+    /// </summary>
+    public static bool IsDispatcher(ClaimsPrincipal user)
+    {
+        return GetUserRole(user) == "dispatcher";
+    }
+
+    /// <summary>
+    /// Mask billing/sensitive fields in a DTO for dispatchers.
+    /// Admins see full data; dispatchers see operational data only.
+    /// Phase 2: Prepares for future payment integration.
+    /// </summary>
+    /// <param name="user">The authenticated user</param>
+    /// <param name="dto">DTO object with billing properties</param>
+    public static void MaskBillingFields(ClaimsPrincipal user, object dto)
+    {
+        // Only mask for dispatchers (admins see everything)
+        if (!IsDispatcher(user)) return;
+        
+        // Use reflection to null out billing-related properties
+        var type = dto.GetType();
+        
+        var billingProps = new[]
+        {
+            "PaymentMethodId",
+            "PaymentMethodLast4", 
+            "CardLast4",
+            "PaymentAmount",
+            "TotalAmount",
+            "TotalFare",
+            "EstimatedCost",
+            "BillingNotes"
+        };
+        
+        foreach (var propName in billingProps)
+        {
+            var prop = type.GetProperty(propName);
+            if (prop != null && prop.CanWrite)
+            {
+                prop.SetValue(dto, null);
+            }
+        }
+    }
+
+    // =====================================================================
     // OWNERSHIP CHECKS
     // =====================================================================
 
