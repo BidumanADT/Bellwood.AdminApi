@@ -29,6 +29,12 @@ builder.Services.AddSingleton<IBookingRepository, FileBookingRepository>();
 builder.Services.AddSingleton<IAffiliateRepository, FileAffiliateRepository>();
 builder.Services.AddSingleton<IDriverRepository, FileDriverRepository>();
 
+// Phase 2: OAuth credential management
+builder.Services.AddDataProtection(); // ASP.NET Core Data Protection API
+builder.Services.AddMemoryCache(); // For credential caching
+builder.Services.AddSingleton<IOAuthCredentialRepository, FileOAuthCredentialRepository>();
+builder.Services.AddSingleton<OAuthCredentialService>();
+
 // Location tracking service (in-memory)
 builder.Services.AddSingleton<ILocationService, InMemoryLocationService>();
 
@@ -1896,7 +1902,107 @@ app.MapPost("/dev/seed-affiliates", async (
 })
 .WithName("SeedAffiliates")
 .RequireAuthorization("AdminOnly"); // Phase 2: Only admins can seed data (security best practice)
- 
+
+// ===================================================================
+// PHASE 2: OAUTH CREDENTIAL MANAGEMENT ENDPOINTS
+// ===================================================================
+
+// GET /api/admin/oauth - Get current OAuth credentials (secret masked)
+app.MapGet("/api/admin/oauth", async (
+    OAuthCredentialService oauthService,
+    HttpContext context) =>
+{
+    var credentials = await oauthService.GetCredentialsAsync();
+    
+    if (credentials == null)
+    {
+        return Results.Ok(new
+        {
+            configured = false,
+            message = "OAuth credentials not configured. Use PUT /api/admin/oauth to set them."
+        });
+    }
+
+    // Return masked response (never expose full secret)
+    var response = new OAuthCredentialsResponseDto
+    {
+        ClientId = credentials.ClientId,
+        ClientSecretMasked = MaskSecret(credentials.ClientSecret),
+        LastUpdatedUtc = credentials.LastUpdatedUtc,
+        LastUpdatedBy = credentials.LastUpdatedBy,
+        Description = credentials.Description
+    };
+
+    return Results.Ok(new
+    {
+        configured = true,
+        credentials = response
+    });
+})
+.WithName("GetOAuthCredentials")
+.RequireAuthorization("AdminOnly") // Phase 2: Only admins can view credentials
+.WithTags("Admin", "OAuth");
+
+// PUT /api/admin/oauth - Update OAuth credentials
+app.MapPut("/api/admin/oauth", async (
+    [FromBody] UpdateOAuthCredentialsRequest request,
+    HttpContext context,
+    OAuthCredentialService oauthService,
+    ILoggerFactory loggerFactory) =>
+{
+    var log = loggerFactory.CreateLogger("oauth");
+    
+    // Validate request
+    if (string.IsNullOrWhiteSpace(request.ClientId) || 
+        string.IsNullOrWhiteSpace(request.ClientSecret))
+    {
+        return Results.BadRequest(new 
+        { 
+            error = "Both ClientId and ClientSecret are required" 
+        });
+    }
+
+    // Get admin username for audit trail
+    var adminUsername = context.User.FindFirst("sub")?.Value ?? "unknown";
+
+    // Update credentials (encrypts before storage, invalidates cache)
+    var credentials = new OAuthClientCredentials
+    {
+        Id = "default",
+        ClientId = request.ClientId,
+        ClientSecret = request.ClientSecret,
+        Description = request.Description
+    };
+
+    await oauthService.UpdateCredentialsAsync(credentials, adminUsername);
+
+    log.LogInformation("OAuth credentials updated by admin {AdminUsername}", adminUsername);
+
+    // Return success with masked secret
+    return Results.Ok(new
+    {
+        message = "OAuth credentials updated successfully",
+        clientId = credentials.ClientId,
+        clientSecretMasked = MaskSecret(credentials.ClientSecret),
+        updatedBy = adminUsername,
+        updatedAt = DateTime.UtcNow,
+        note = "Cache invalidated. New credentials will be used for all future API calls."
+    });
+})
+.WithName("UpdateOAuthCredentials")
+.RequireAuthorization("AdminOnly") // Phase 2: Only admins can update credentials
+.WithTags("Admin", "OAuth");
+
+// Helper: Mask client secret for display
+static string MaskSecret(string secret)
+{
+    if (string.IsNullOrWhiteSpace(secret)) return "********";
+    if (secret.Length <= 8) return "********";
+    
+    // Show first 4 and last 4 characters, mask the middle
+    return $"{secret[..4]}...{secret[^4..]}";
+}
+
 // ===================================================================
 // APPLICATION START
 // ===================================================================
