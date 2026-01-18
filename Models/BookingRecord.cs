@@ -77,4 +77,57 @@ public sealed class BookingRecord
 
     // Full payload for detail view
     public BellwoodGlobal.Mobile.Models.QuoteDraft Draft { get; set; } = new();
+
+    // =====================================================================
+    // PAYMENT & BILLING FIELDS (Phase 3C - Sensitive Data Protection)
+    // =====================================================================
+    
+    /// <summary>
+    /// Stripe payment method ID (encrypted).
+    /// Example: "pm_1234567890abcdef" (encrypted with Data Protection API)
+    /// Phase 3+: Populated when payment is processed.
+    /// </summary>
+    public string? PaymentMethodIdEncrypted { get; set; }
+    
+    /// <summary>
+    /// Last 4 digits of payment method (unencrypted for display).
+    /// Example: "4242" for Visa ending in 4242
+    /// Phase 3+: Populated when payment is processed.
+    /// </summary>
+    public string? PaymentMethodLast4 { get; set; }
+    
+    /// <summary>
+    /// Payment method type (unencrypted).
+    /// Example: "card", "bank_account"
+    /// Phase 3+: Populated when payment is processed.
+    /// </summary>
+    public string? PaymentMethodType { get; set; }
+    
+    /// <summary>
+    /// Total amount charged in cents (unencrypted).
+    /// Example: 12500 = $125.00
+    /// Phase 3+: Populated when payment is processed.
+    /// </summary>
+    public int? TotalAmountCents { get; set; }
+    
+    /// <summary>
+    /// Total fare/price in cents (unencrypted).
+    /// Example: 10000 = $100.00 (before fees/taxes)
+    /// Phase 3+: Populated when pricing is calculated.
+    /// </summary>
+    public int? TotalFareCents { get; set; }
+    
+    /// <summary>
+    /// Currency code (ISO 4217).
+    /// Example: "USD", "CAD", "EUR"
+    /// Phase 3+: Populated when payment is processed.
+    /// </summary>
+    public string? CurrencyCode { get; set; }
+    
+    /// <summary>
+    /// Billing notes (encrypted if contains sensitive info).
+    /// Example: Invoice number, special billing instructions
+    /// Phase 3+: Optional field for internal use.
+    /// </summary>
+    public string? BillingNotesEncrypted { get; set; }
 }

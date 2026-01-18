@@ -45,6 +45,11 @@ builder.Services.AddSingleton<IDriverRepository, FileDriverRepository>();
 builder.Services.AddSingleton<IAuditLogRepository, FileAuditLogRepository>();
 builder.Services.AddSingleton<AuditLogger>();
 
+// Phase 3C: Data protection services
+builder.Services.AddSingleton<ISensitiveDataProtector, SensitiveDataProtector>();
+builder.Services.AddSingleton<IDataRetentionService, DataRetentionService>();
+builder.Services.AddHostedService<DataRetentionBackgroundService>();
+
 // Phase 2: OAuth credential management
 builder.Services.AddDataProtection(); // ASP.NET Core Data Protection API
 builder.Services.AddMemoryCache(); // For credential caching
@@ -2527,3 +2532,116 @@ app.MapDelete("/api/admin/audit-logs/cleanup", async (
 .WithName("CleanupAuditLogs")
 .RequireAuthorization("AdminOnly")
 .WithTags("Admin", "Audit");
+
+// ===================================================================
+// PHASE 3C: DATA RETENTION ENDPOINTS (Admin-Only)
+// ===================================================================
+
+// GET /api/admin/data-retention/policy - Get data retention policy
+app.MapGet("/api/admin/data-retention/policy", (
+    IDataRetentionService retentionService) =>
+{
+    var policy = retentionService.GetRetentionPolicy();
+
+    return Results.Ok(new
+    {
+        policy,
+        description = "Data retention policy for GDPR compliance",
+        note = "Automated cleanup runs daily at 2 AM UTC"
+    });
+})
+.WithName("GetDataRetentionPolicy")
+.RequireAuthorization("AdminOnly")
+.WithTags("Admin", "DataRetention");
+
+// POST /api/admin/data-retention/cleanup - Manual data retention cleanup
+app.MapPost("/api/admin/data-retention/cleanup", async (
+    HttpContext context,
+    IDataRetentionService retentionService,
+    AuditLogger auditLogger) =>
+{
+    var startTime = DateTime.UtcNow;
+
+    // Run all cleanup tasks
+    var auditLogsDeleted = await retentionService.CleanupOldAuditLogsAsync();
+    var bookingsAnonymized = await retentionService.AnonymizeOldBookingsAsync();
+    var quotesDeleted = await retentionService.DeleteOldQuotesAsync();
+
+    var duration = DateTime.UtcNow - startTime;
+
+    // Audit log manual cleanup
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        "DataRetention.ManualCleanup",
+        "System",
+        details: new
+        {
+            auditLogsDeleted,
+            bookingsAnonymized,
+            quotesDeleted,
+            durationSeconds = duration.TotalSeconds
+        },
+        httpContext: context);
+
+    return Results.Ok(new
+    {
+        message = "Data retention cleanup completed successfully",
+        auditLogsDeleted,
+        bookingsAnonymized,
+        quotesDeleted,
+        durationSeconds = duration.TotalSeconds,
+        policy = retentionService.GetRetentionPolicy()
+    });
+})
+.WithName("ManualDataRetentionCleanup")
+.RequireAuthorization("AdminOnly")
+.WithTags("Admin", "DataRetention");
+
+
+// POST /api/admin/data-protection/test - Test data encryption/decryption
+app.MapPost("/api/admin/data-protection/test", (
+    ISensitiveDataProtector dataProtector) =>
+{
+    var testData = "Sensitive test data 12345";
+
+    try
+    {
+        // Test encryption
+        var encrypted = dataProtector.Protect(testData);
+        var isProtected = dataProtector.IsProtected(encrypted);
+
+        // Test decryption
+        var decrypted = dataProtector.Unprotect(encrypted);
+
+        var success = decrypted == testData;
+
+        return Results.Ok(new
+        {
+            success,
+            message = success ? "Data protection is working correctly" : "Data protection test failed",
+            test = new
+            {
+                original = testData,
+                encrypted = encrypted.Substring(0, Math.Min(50, encrypted.Length)) + "...",
+                decrypted,
+                isProtected,
+                encryptedLength = encrypted.Length
+            }
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(
+            statusCode: 500,
+            title: "Data protection test failed",
+            detail: ex.Message);
+    }
+})
+.WithName("TestDataProtection")
+.RequireAuthorization("AdminOnly")
+.WithTags("Admin", "DataProtection");
+
+
+// ===================================================================
+// PHASE 2: OAUTH CREDENTIAL MANAGEMENT ENDPOINTS
+// ===================================================================
