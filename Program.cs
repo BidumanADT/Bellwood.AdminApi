@@ -29,6 +29,10 @@ builder.Services.AddSingleton<IBookingRepository, FileBookingRepository>();
 builder.Services.AddSingleton<IAffiliateRepository, FileAffiliateRepository>();
 builder.Services.AddSingleton<IDriverRepository, FileDriverRepository>();
 
+// Phase 3: Audit log repository and logger service
+builder.Services.AddSingleton<IAuditLogRepository, FileAuditLogRepository>();
+builder.Services.AddSingleton<AuditLogger>();
+
 // Phase 2: OAuth credential management
 builder.Services.AddDataProtection(); // ASP.NET Core Data Protection API
 builder.Services.AddMemoryCache(); // For credential caching
@@ -1907,104 +1911,113 @@ app.MapPost("/dev/seed-affiliates", async (
 // PHASE 2: OAUTH CREDENTIAL MANAGEMENT ENDPOINTS
 // ===================================================================
 
-// GET /api/admin/oauth - Get current OAuth credentials (secret masked)
-app.MapGet("/api/admin/oauth", async (
-    OAuthCredentialService oauthService,
-    HttpContext context) =>
-{
-    var credentials = await oauthService.GetCredentialsAsync();
-    
-    if (credentials == null)
-    {
-        return Results.Ok(new
-        {
-            configured = false,
-            message = "OAuth credentials not configured. Use PUT /api/admin/oauth to set them."
-        });
-    }
+// ===================================================================
+// PHASE 3: AUDIT LOG ENDPOINTS (Admin-Only)
+// ===================================================================
 
-    // Return masked response (never expose full secret)
-    var response = new OAuthCredentialsResponseDto
-    {
-        ClientId = credentials.ClientId,
-        ClientSecretMasked = MaskSecret(credentials.ClientSecret),
-        LastUpdatedUtc = credentials.LastUpdatedUtc,
-        LastUpdatedBy = credentials.LastUpdatedBy,
-        Description = credentials.Description
-    };
-
-    return Results.Ok(new
-    {
-        configured = true,
-        credentials = response
-    });
-})
-.WithName("GetOAuthCredentials")
-.RequireAuthorization("AdminOnly") // Phase 2: Only admins can view credentials
-.WithTags("Admin", "OAuth");
-
-// PUT /api/admin/oauth - Update OAuth credentials
-app.MapPut("/api/admin/oauth", async (
-    [FromBody] UpdateOAuthCredentialsRequest request,
+// GET /api/admin/audit-logs - Query audit logs with filtering and pagination
+app.MapGet("/api/admin/audit-logs", async (
     HttpContext context,
-    OAuthCredentialService oauthService,
-    ILoggerFactory loggerFactory) =>
+    [FromQuery] string? userId,
+    [FromQuery] string? entityType,
+    [FromQuery] string? action,
+    [FromQuery] DateTime? startDate,
+    [FromQuery] DateTime? endDate,
+    [FromQuery] int take,
+    [FromQuery] int skip,
+    IAuditLogRepository auditRepo) =>
 {
-    var log = loggerFactory.CreateLogger("oauth");
-    
-    // Validate request
-    if (string.IsNullOrWhiteSpace(request.ClientId) || 
-        string.IsNullOrWhiteSpace(request.ClientSecret))
-    {
-        return Results.BadRequest(new 
-        { 
-            error = "Both ClientId and ClientSecret are required" 
-        });
-    }
+    // Validate and default pagination
+    if (take <= 0 || take > 1000) take = 100;
+    if (skip < 0) skip = 0;
 
-    // Get admin username for audit trail
-    var adminUsername = context.User.FindFirst("sub")?.Value ?? "unknown";
+    var logs = await auditRepo.GetLogsAsync(
+        userId: userId,
+        entityType: entityType,
+        action: action,
+        startDate: startDate,
+        endDate: endDate,
+        take: take,
+        skip: skip);
 
-    // Update credentials (encrypts before storage, invalidates cache)
-    var credentials = new OAuthClientCredentials
-    {
-        Id = "default",
-        ClientId = request.ClientId,
-        ClientSecret = request.ClientSecret,
-        Description = request.Description
-    };
+    var totalCount = await auditRepo.GetCountAsync(
+        userId: userId,
+        entityType: entityType,
+        action: action,
+        startDate: startDate,
+        endDate: endDate);
 
-    await oauthService.UpdateCredentialsAsync(credentials, adminUsername);
-
-    log.LogInformation("OAuth credentials updated by admin {AdminUsername}", adminUsername);
-
-    // Return success with masked secret
     return Results.Ok(new
     {
-        message = "OAuth credentials updated successfully",
-        clientId = credentials.ClientId,
-        clientSecretMasked = MaskSecret(credentials.ClientSecret),
-        updatedBy = adminUsername,
-        updatedAt = DateTime.UtcNow,
-        note = "Cache invalidated. New credentials will be used for all future API calls."
+        logs,
+        pagination = new
+        {
+            total = totalCount,
+            skip,
+            take,
+            returned = logs.Count
+        },
+        filters = new
+        {
+            userId,
+            entityType,
+            action,
+            startDate,
+            endDate
+        }
     });
 })
-.WithName("UpdateOAuthCredentials")
-.RequireAuthorization("AdminOnly") // Phase 2: Only admins can update credentials
-.WithTags("Admin", "OAuth");
+.WithName("GetAuditLogs")
+.RequireAuthorization("AdminOnly") // Phase 3: Only admins can view audit logs
+.WithTags("Admin", "Audit");
 
-// Helper: Mask client secret for display
-static string MaskSecret(string secret)
+
+// GET /api/admin/audit-logs/{id} - Get specific audit log by ID
+app.MapGet("/api/admin/audit-logs/{id}", async (
+    string id,
+    IAuditLogRepository auditRepo) =>
 {
-    if (string.IsNullOrWhiteSpace(secret)) return "********";
-    if (secret.Length <= 8) return "********";
+    var log = await auditRepo.GetByIdAsync(id);
     
-    // Show first 4 and last 4 characters, mask the middle
-    return $"{secret[..4]}...{secret[^4..]}";
-}
+    if (log is null)
+        return Results.NotFound(new { error = "Audit log not found" });
+
+    return Results.Ok(log);
+})
+.WithName("GetAuditLogById")
+.RequireAuthorization("AdminOnly")
+.WithTags("Admin", "Audit");
+
+// DELETE /api/admin/audit-logs/cleanup - Clean up old audit logs
+app.MapDelete("/api/admin/audit-logs/cleanup", async (
+    [FromQuery] int retentionDays,
+    HttpContext context,
+    IAuditLogRepository auditRepo,
+    AuditLogger auditLogger) =>
+{
+    // Default retention: 90 days
+    if (retentionDays <= 0 || retentionDays > 365) retentionDays = 90;
+
+    var deletedCount = await auditRepo.DeleteOldLogsAsync(retentionDays);
+
+    // Log the cleanup action
+    await auditLogger.LogSystemActionAsync(
+        AuditActions.DataRetentionCleanup,
+        "AuditLog",
+        details: new { retentionDays, deletedCount });
+
+    return Results.Ok(new
+    {
+        message = "Audit log cleanup completed",
+        deletedCount,
+        retentionDays,
+        cutoffDate = DateTime.UtcNow.AddDays(-retentionDays)
+    });
+})
+.WithName("CleanupAuditLogs")
+.RequireAuthorization("AdminOnly")
+.WithTags("Admin", "Audit");
 
 // ===================================================================
-// APPLICATION START
+// PHASE 2: OAUTH CREDENTIAL MANAGEMENT ENDPOINTS
 // ===================================================================
-
-app.Run();
