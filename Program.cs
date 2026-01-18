@@ -3,12 +3,16 @@ using System.Text.Json.Serialization;
 using Bellwood.AdminApi.Models;
 using Bellwood.AdminApi.Services;
 using Bellwood.AdminApi.Hubs;
+using Bellwood.AdminApi.Middleware;
 using BellwoodGlobal.Mobile.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using System.Text.Json;
 
 // Phase 1: Use static import for authorization helper methods
 using static Bellwood.AdminApi.Services.UserAuthorizationHelper;
@@ -18,6 +22,14 @@ var builder = WebApplication.CreateBuilder(args);
 // ===================================================================
 // SERVICE REGISTRATION
 // ===================================================================
+
+// Phase 3: Application Insights for production monitoring
+builder.Services.AddApplicationInsightsTelemetry(options =>
+{
+    // Configuration will come from appsettings.json or environment variables
+    // For local development, this can be disabled or use a development instrumentation key
+    options.ConnectionString = builder.Configuration["ApplicationInsights:ConnectionString"];
+});
 
 // Email configuration and sender
 builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection("Email"));
@@ -50,6 +62,10 @@ builder.Services.AddSignalR(options =>
 
 // Background service for broadcasting location updates via SignalR
 builder.Services.AddHostedService<LocationBroadcastService>();
+
+// Phase 3: Enhanced health checks
+builder.Services.AddHealthChecks()
+    .AddCheck<AdminApiHealthCheck>("AdminAPI", tags: new[] { "ready", "live" });
 
 // API documentation
 builder.Services.AddEndpointsApiExplorer();
@@ -197,6 +213,9 @@ var app = builder.Build();
 
 app.UseCors();
 
+// Phase 3: Error tracking middleware (before authentication to track all errors)
+app.UseMiddleware<ErrorTrackingMiddleware>();
+
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -215,6 +234,43 @@ if (app.Environment.IsDevelopment())
 
 // Health check endpoint
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+
+// Phase 3: Enhanced health check endpoints
+app.MapHealthChecks("/health/live", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("live"),
+    ResponseWriter = WriteHealthCheckResponse
+});
+
+app.MapHealthChecks("/health/ready", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("ready"),
+    ResponseWriter = WriteHealthCheckResponse
+});
+
+// Helper: Write detailed health check response as JSON
+static async Task WriteHealthCheckResponse(HttpContext context, HealthReport report)
+{
+    context.Response.ContentType = "application/json";
+
+    var result = JsonSerializer.Serialize(new
+    {
+        status = report.Status.ToString(),
+        timestamp = DateTime.UtcNow,
+        duration = report.TotalDuration.TotalMilliseconds,
+        checks = report.Entries.Select(e => new
+        {
+            name = e.Key,
+            status = e.Value.Status.ToString(),
+            description = e.Value.Description,
+            duration = e.Value.Duration.TotalMilliseconds,
+            exception = e.Value.Exception?.Message,
+            data = e.Value.Data
+        })
+    }, new JsonSerializerOptions { WriteIndented = true });
+
+    await context.Response.WriteAsync(result);
+}
 
 // ===================================================================
 // QUOTE ENDPOINTS
@@ -1844,7 +1900,7 @@ app.MapDelete("/affiliates/{id}", async (
     
     await affiliateRepo.DeleteAsync(id);
 
-    // Phase 3: Audit affiliate deletion (with cascade info)
+    // Phase 3: Audit driver deletion
     await auditLogger.LogSuccessAsync(
         context.User,
         AuditActions.AffiliateDeleted,
