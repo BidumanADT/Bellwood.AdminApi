@@ -221,7 +221,7 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 // ===================================================================
 
 // POST /quotes/seed - Seed sample quotes (DEV ONLY)
-app.MapPost("/quotes/seed", async (HttpContext context, IQuoteRepository repo) =>
+app.MapPost("/quotes/seed", async (HttpContext context, IQuoteRepository repo, AuditLogger auditLogger) =>
 {
     var now = DateTime.UtcNow;
     
@@ -345,6 +345,14 @@ app.MapPost("/quotes/seed", async (HttpContext context, IQuoteRepository repo) =
     foreach (var r in samples)
         await repo.AddAsync(r);
 
+    // Phase 3: Audit log the seed action
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.QuoteCreated,
+        "Quote",
+        details: new { count = samples.Length, action = "bulk_seed" },
+        httpContext: context);
+
     return Results.Ok(new { 
         added = samples.Length,
         createdByUserId = createdByUserId ?? "(null - legacy data)"
@@ -359,6 +367,7 @@ app.MapPost("/quotes", async (
     HttpContext context,
     IEmailSender email,
     IQuoteRepository repo,
+    AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
 {
     var log = loggerFactory.CreateLogger("quotes");
@@ -383,6 +392,19 @@ app.MapPost("/quotes", async (
     };
 
     await repo.AddAsync(rec);
+
+    // Phase 3: Audit log quote creation
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.QuoteCreated,
+        "Quote",
+        rec.Id,
+        details: new { 
+            passengerName = rec.PassengerName,
+            vehicleClass = rec.VehicleClass,
+            pickupLocation = rec.PickupLocation
+        },
+        httpContext: context);
 
     try
     {
@@ -447,7 +469,7 @@ app.MapGet("/quotes/list", async ([FromQuery] int take, HttpContext context, IQu
 .RequireAuthorization("StaffOnly"); // Phase 2: Changed from generic auth to StaffOnly
 
 // GET /quotes/{id} - Get detailed quote by ID
-app.MapGet("/quotes/{id}", async (string id, HttpContext context, IQuoteRepository repo) =>
+app.MapGet("/quotes/{id}", async (string id, HttpContext context, IQuoteRepository repo, AuditLogger auditLogger) =>
 {
     var rec = await repo.GetAsync(id);
     if (rec is null) 
@@ -468,6 +490,14 @@ app.MapGet("/quotes/{id}", async (string id, HttpContext context, IQuoteReposito
         // Legacy records (null CreatedByUserId) are not accessible to non-staff
         if (string.IsNullOrEmpty(rec.CreatedByUserId))
         {
+            // Phase 3: Audit forbidden access attempt
+            await auditLogger.LogForbiddenAsync(
+                user,
+                AuditActions.QuoteViewed,
+                "Quote",
+                id,
+                httpContext: context);
+
             return Results.Problem(
                 statusCode: 403,
                 title: "Forbidden",
@@ -477,6 +507,14 @@ app.MapGet("/quotes/{id}", async (string id, HttpContext context, IQuoteReposito
         // Check if user owns this record
         if (rec.CreatedByUserId != currentUserId)
         {
+            // Phase 3: Audit forbidden access attempt
+            await auditLogger.LogForbiddenAsync(
+                user,
+                AuditActions.QuoteViewed,
+                "Quote",
+                id,
+                httpContext: context);
+
             return Results.Problem(
                 statusCode: 403,
                 title: "Forbidden",
@@ -484,6 +522,14 @@ app.MapGet("/quotes/{id}", async (string id, HttpContext context, IQuoteReposito
         }
     }
     
+    // Phase 3: Audit successful quote view
+    await auditLogger.LogSuccessAsync(
+        user,
+        AuditActions.QuoteViewed,
+        "Quote",
+        id,
+        httpContext: context);
+
     // Phase 2: Build response DTO with billing fields
     var response = new QuoteDetailResponseDto
     {
@@ -516,7 +562,7 @@ app.MapGet("/quotes/{id}", async (string id, HttpContext context, IQuoteReposito
 // ===================================================================
 
 // POST /bookings/seed - Seed sample bookings (DEV ONLY)
-app.MapPost("/bookings/seed", async (HttpContext context, IBookingRepository repo) =>
+app.MapPost("/bookings/seed", async (HttpContext context, IBookingRepository repo, AuditLogger auditLogger) =>
 {
     var now = DateTime.UtcNow;
     
@@ -611,7 +657,7 @@ app.MapPost("/bookings/seed", async (HttpContext context, IBookingRepository rep
             PickupDateTime = now.AddHours(48),
             Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
                 Booker = new() { FirstName="David", LastName="Miller", PhoneNumber = "312-555-7777", EmailAddress = "david.miller@example.com" },
-                Passenger = new() { FirstName="Emma", LastName="Watson", PhoneNumber = "312-555-8888", EmailAddress = "emma.watson@example.com" },
+                Passenger = new() { FirstName="Emma", LastName = "Watson", PhoneNumber = "312-555-8888", EmailAddress = "emma.watson@example.com" },
                 VehicleClass = "S-Class",
                 PickupDateTime = now.AddHours(48),
                 PickupLocation = "O'Hare FBO",
@@ -733,6 +779,14 @@ app.MapPost("/bookings/seed", async (HttpContext context, IBookingRepository rep
     foreach (var r in samples)
         await repo.AddAsync(r);
 
+    // Phase 3: Audit log the seed action
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.BookingCreated,
+        "Booking",
+        details: new { count = samples.Length, action = "bulk_seed" },
+        httpContext: context);
+
     return Results.Ok(new { 
         added = samples.Length,
         createdByUserId = createdByUserId ?? "(null - legacy data)"  // FIX: Add to response
@@ -747,6 +801,7 @@ app.MapPost("/bookings", async (
     HttpContext context,
     IEmailSender email,
     IBookingRepository repo,
+    AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
 {
     var log = loggerFactory.CreateLogger("bookings");
@@ -771,6 +826,20 @@ app.MapPost("/bookings", async (
     };
 
     await repo.AddAsync(rec);
+
+    // Phase 3: Audit log booking creation
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.BookingCreated,
+        "Booking",
+        rec.Id,
+        details: new {
+            passengerName = rec.PassengerName,
+            vehicleClass = rec.VehicleClass,
+            pickupLocation = rec.PickupLocation,
+            pickupDateTime = rec.PickupDateTime
+        },
+        httpContext: context);
 
     try
     {
@@ -880,7 +949,7 @@ app.MapGet("/bookings/list", async ([FromQuery] int take, HttpContext context, I
 .RequireAuthorization("StaffOnly"); // Phase 2: Changed from generic auth to StaffOnly
 
 // GET /bookings/{id} - Get detailed booking by ID
-app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepository repo) =>
+app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepository repo, AuditLogger auditLogger) =>
 {
     var rec = await repo.GetAsync(id);
     if (rec is null) return Results.NotFound();
@@ -893,12 +962,28 @@ app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepo
     
     if (!CanAccessBooking(user, rec.CreatedByUserId, rec.AssignedDriverUid))
     {
+        // Phase 3: Audit forbidden access attempt
+        await auditLogger.LogForbiddenAsync(
+            user,
+            AuditActions.BookingViewed,
+            "Booking",
+            id,
+            httpContext: context);
+
         return Results.Problem(
             statusCode: 403,
             title: "Forbidden",
             detail: "You do not have permission to view this booking");
     }
     
+    // Phase 3: Audit successful booking view
+    await auditLogger.LogSuccessAsync(
+        user,
+        AuditActions.BookingViewed,
+        "Booking",
+        id,
+        httpContext: context);
+
     // Get user's timezone for PickupDateTimeOffset conversion
     var userTz = GetRequestTimeZone(context);
     
@@ -967,6 +1052,7 @@ app.MapPost("/bookings/{id}/cancel", async (
     HttpContext context,
     IBookingRepository repo,
     IEmailSender email,
+    AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
 {
     var log = loggerFactory.CreateLogger("bookings");
@@ -986,6 +1072,15 @@ app.MapPost("/bookings/{id}/cancel", async (
     {
         log.LogWarning("User {UserId} attempted to cancel booking {BookingId} they don't own", 
             currentUserId, id);
+
+        // Phase 3: Audit forbidden cancellation attempt
+        await auditLogger.LogForbiddenAsync(
+            user,
+            AuditActions.BookingCancelled,
+            "Booking",
+            id,
+            httpContext: context);
+
         return Results.Problem(
             statusCode: 403,
             title: "Forbidden",
@@ -995,11 +1090,33 @@ app.MapPost("/bookings/{id}/cancel", async (
     // Only allow cancellation if status is Requested or Confirmed
     if (booking.Status != BookingStatus.Requested && booking.Status != BookingStatus.Confirmed)
     {
+        // Phase 3: Audit failed cancellation (invalid status)
+        await auditLogger.LogFailureAsync(
+            user,
+            AuditActions.BookingCancelled,
+            "Booking",
+            id,
+            errorMessage: $"Cannot cancel booking with status: {booking.Status}",
+            httpContext: context);
+
         return Results.BadRequest(new { error = $"Cannot cancel booking with status: {booking.Status}" });
     }
 
     // Phase 1: Update status with audit trail (who cancelled and when)
     await repo.UpdateStatusAsync(id, BookingStatus.Cancelled, currentUserId);
+
+    // Phase 3: Audit successful cancellation
+    await auditLogger.LogSuccessAsync(
+        user,
+        AuditActions.BookingCancelled,
+        "Booking",
+        id,
+        details: new {
+            previousStatus = booking.Status.ToString(),
+            passengerName = booking.PassengerName,
+            cancelledBy = currentUserId
+        },
+        httpContext: context);
 
     // Send cancellation email
     try
@@ -1072,6 +1189,16 @@ static TimeZoneInfo GetCentralTimeZone()
             return TimeZoneInfo.Local;
         }
     }
+}
+
+// Helper: Mask client secret for display (Phase 3: OAuth security)
+static string MaskSecret(string secret)
+{
+    if (string.IsNullOrWhiteSpace(secret)) return "********";
+    if (secret.Length <= 8) return "********";
+    
+    // Show first 4 and last 4 characters, mask the middle
+    return $"{secret[..4]}...{secret[^4..]}";
 }
 
 // GET /driver/rides/today - Get driver's rides for the next 24 hours
@@ -1205,6 +1332,7 @@ app.MapPost("/driver/rides/{id}/status", async (
     IBookingRepository repo,
     ILocationService locationService,
     IHubContext<LocationHub> hubContext,
+    AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
 {
     // Finite state machine for ride status transitions
@@ -1237,6 +1365,20 @@ app.MapPost("/driver/rides/{id}/status", async (
     if (!allowedTransitions.ContainsKey(currentStatus) ||
         !allowedTransitions[currentStatus].Contains(request.NewStatus))
     {
+        // Phase 3: Audit failed status update (invalid transition)
+        await auditLogger.LogFailureAsync(
+            context.User,
+            AuditActions.BookingUpdated,
+            "Booking",
+            id,
+            errorMessage: $"Invalid status transition from {currentStatus} to {request.NewStatus}",
+            details: new { 
+                currentStatus = currentStatus.ToString(),
+                requestedStatus = request.NewStatus.ToString(),
+                driverUid
+            },
+            httpContext: context);
+
         return Results.BadRequest(new
         {
             error = $"Invalid status transition from {currentStatus} to {request.NewStatus}"
@@ -1257,6 +1399,21 @@ app.MapPost("/driver/rides/{id}/status", async (
 
     // FIX: Use new method that persists BOTH CurrentRideStatus and Status
     await repo.UpdateRideStatusAsync(id, request.NewStatus, newBookingStatus);
+
+    // Phase 3: Audit successful status update
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.BookingUpdated,
+        "Booking",
+        id,
+        details: new {
+            previousRideStatus = currentStatus.ToString(),
+            newRideStatus = request.NewStatus.ToString(),
+            newBookingStatus = newBookingStatus.ToString(),
+            driverUid,
+            passengerName = booking.PassengerName
+        },
+        httpContext: context);
 
     // Broadcast status change to AdminPortal and passengers via SignalR
     await hubContext.BroadcastRideStatusChangedAsync(
@@ -1590,7 +1747,9 @@ app.MapGet("/affiliates/list", async (IAffiliateRepository affiliateRepo, IDrive
 // POST /affiliates - Create a new affiliate
 app.MapPost("/affiliates", async (
     [FromBody] Affiliate affiliate,
-    IAffiliateRepository repo) =>
+    HttpContext context,
+    IAffiliateRepository repo,
+    AuditLogger auditLogger) =>
 {
     if (string.IsNullOrWhiteSpace(affiliate.Name) || string.IsNullOrWhiteSpace(affiliate.Email))
         return Results.BadRequest(new { error = "Name and Email are required" });
@@ -1599,6 +1758,20 @@ app.MapPost("/affiliates", async (
     affiliate.Drivers = new List<Driver>(); // Initialize empty drivers list
 
     await repo.AddAsync(affiliate);
+
+    // Phase 3: Audit affiliate creation
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.AffiliateCreated,
+        "Affiliate",
+        affiliate.Id,
+        details: new {
+            name = affiliate.Name,
+            email = affiliate.Email,
+            city = affiliate.City
+        },
+        httpContext: context);
+
     return Results.Created($"/affiliates/{affiliate.Id}", affiliate);
 })
 .WithName("CreateAffiliate")
@@ -1622,7 +1795,9 @@ app.MapGet("/affiliates/{id}", async (string id, IAffiliateRepository affiliateR
 app.MapPut("/affiliates/{id}", async (
     string id,
     [FromBody] Affiliate affiliate,
-    IAffiliateRepository repo) =>
+    HttpContext context,
+    IAffiliateRepository repo,
+    AuditLogger auditLogger) =>
 {
     var existing = await repo.GetByIdAsync(id);
     if (existing is null)
@@ -1630,6 +1805,20 @@ app.MapPut("/affiliates/{id}", async (
 
     affiliate.Id = id; // Ensure ID matches
     await repo.UpdateAsync(affiliate);
+
+    // Phase 3: Audit affiliate update
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.AffiliateUpdated,
+        "Affiliate",
+        id,
+        details: new {
+            name = affiliate.Name,
+            email = affiliate.Email,
+            city = affiliate.City
+        },
+        httpContext: context);
+
     return Results.Ok(affiliate);
 })
 .WithName("UpdateAffiliate")
@@ -1638,17 +1827,36 @@ app.MapPut("/affiliates/{id}", async (
 // DELETE /affiliates/{id} - Delete affiliate (cascade delete drivers)
 app.MapDelete("/affiliates/{id}", async (
     string id,
+    HttpContext context,
     IAffiliateRepository affiliateRepo,
-    IDriverRepository driverRepo) =>
+    IDriverRepository driverRepo,
+    AuditLogger auditLogger) =>
 {
     var existing = await affiliateRepo.GetByIdAsync(id);
     if (existing is null)
         return Results.NotFound();
 
+    // Get driver count before deletion for audit
+    var drivers = await driverRepo.GetByAffiliateIdAsync(id);
+
     // Cascade delete all drivers belonging to this affiliate
     await driverRepo.DeleteByAffiliateIdAsync(id);
     
     await affiliateRepo.DeleteAsync(id);
+
+    // Phase 3: Audit affiliate deletion (with cascade info)
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.AffiliateDeleted,
+        "Affiliate",
+        id,
+        details: new {
+            name = existing.Name,
+            email = existing.Email,
+            cascadeDeletedDrivers = drivers.Count
+        },
+        httpContext: context);
+
     return Results.Ok(new { message = "Affiliate and associated drivers deleted", id });
 })
 .WithName("DeleteAffiliate")
@@ -1658,8 +1866,10 @@ app.MapDelete("/affiliates/{id}", async (
 app.MapPost("/affiliates/{affiliateId}/drivers", async (
     string affiliateId,
     [FromBody] Driver driver,
+    HttpContext context,
     IAffiliateRepository affiliateRepo,
-    IDriverRepository driverRepo) =>
+    IDriverRepository driverRepo,
+    AuditLogger auditLogger) =>
 {
     var affiliate = await affiliateRepo.GetByIdAsync(affiliateId);
     if (affiliate is null)
@@ -1673,13 +1883,44 @@ app.MapPost("/affiliates/{affiliateId}/drivers", async (
     {
         var isUnique = await driverRepo.IsUserUidUniqueAsync(driver.UserUid);
         if (!isUnique)
+        {
+            // Phase 3: Audit failed driver creation (duplicate UserUid)
+            await auditLogger.LogAsync(
+                context.User,
+                AuditActions.DriverCreated,
+                "Driver",
+                details: new { 
+                    driverName = driver.Name,
+                    userUid = driver.UserUid,
+                    affiliateId
+                },
+                httpContext: context,
+                result: AuditLogResult.ValidationError,
+                errorMessage: $"UserUid '{driver.UserUid}' already assigned to another driver");
+
             return Results.BadRequest(new { error = $"UserUid '{driver.UserUid}' is already assigned to another driver" });
+        }
     }
 
     driver.Id = Guid.NewGuid().ToString("N");
     driver.AffiliateId = affiliateId;
 
     await driverRepo.AddAsync(driver);
+
+    // Phase 3: Audit driver creation
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.DriverCreated,
+        "Driver",
+        driver.Id,
+        details: new {
+            name = driver.Name,
+            userUid = driver.UserUid,
+            affiliateId,
+            affiliateName = affiliate.Name
+        },
+        httpContext: context);
+
     return Results.Created($"/drivers/{driver.Id}", driver);
 })
 .WithName("CreateDriver")
@@ -1716,7 +1957,9 @@ app.MapGet("/drivers/{id}", async (string id, IDriverRepository repo) =>
 app.MapPut("/drivers/{id}", async (
     string id,
     [FromBody] Driver driver,
-    IDriverRepository repo) =>
+    HttpContext context,
+    IDriverRepository repo,
+    AuditLogger auditLogger) =>
 {
     var existing = await repo.GetByIdAsync(id);
     if (existing is null)
@@ -1727,12 +1970,42 @@ app.MapPut("/drivers/{id}", async (
     {
         var isUnique = await repo.IsUserUidUniqueAsync(driver.UserUid, excludeDriverId: id);
         if (!isUnique)
+        {
+            // Phase 3: Audit failed driver update (duplicate UserUid)
+            await auditLogger.LogAsync(
+                context.User,
+                AuditActions.DriverUpdated,
+                "Driver",
+                id,
+                details: new { 
+                    driverName = driver.Name,
+                    userUid = driver.UserUid
+                },
+                httpContext: context,
+                result: AuditLogResult.ValidationError,
+                errorMessage: $"UserUid '{driver.UserUid}' already assigned to another driver");
+
             return Results.BadRequest(new { error = $"UserUid '{driver.UserUid}' is already assigned to another driver" });
+        }
     }
 
     driver.Id = id;
     driver.AffiliateId = existing.AffiliateId; // Preserve affiliate association
     await repo.UpdateAsync(driver);
+
+    // Phase 3: Audit driver update
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.DriverUpdated,
+        "Driver",
+        id,
+        details: new {
+            name = driver.Name,
+            userUid = driver.UserUid,
+            previousUserUid = existing.UserUid
+        },
+        httpContext: context);
+
     return Results.Ok(driver);
 })
 .WithName("UpdateDriver")
@@ -1741,13 +2014,29 @@ app.MapPut("/drivers/{id}", async (
 // DELETE /drivers/{id} - Delete driver
 app.MapDelete("/drivers/{id}", async (
     string id,
-    IDriverRepository repo) =>
+    HttpContext context,
+    IDriverRepository repo,
+    AuditLogger auditLogger) =>
 {
     var existing = await repo.GetByIdAsync(id);
     if (existing is null)
         return Results.NotFound();
 
     await repo.DeleteAsync(id);
+
+    // Phase 3: Audit driver deletion
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.DriverDeleted,
+        "Driver",
+        id,
+        details: new {
+            name = existing.Name,
+            userUid = existing.UserUid,
+            affiliateId = existing.AffiliateId
+        },
+        httpContext: context);
+
     return Results.Ok(new { message = "Driver deleted", id });
 })
 .WithName("DeleteDriver")
@@ -1757,10 +2046,12 @@ app.MapDelete("/drivers/{id}", async (
 app.MapPost("/bookings/{bookingId}/assign-driver", async (
     string bookingId,
     [FromBody] DriverAssignmentRequest request,
+    HttpContext context,
     IBookingRepository bookingRepo,
     IDriverRepository driverRepo,
     IAffiliateRepository affiliateRepo,
     IEmailSender email,
+    AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
 {
     var log = loggerFactory.CreateLogger("bookings");
@@ -1778,6 +2069,16 @@ app.MapPost("/bookings/{bookingId}/assign-driver", async (
     // CRITICAL: Validate driver has UserUid for driver app authentication
     if (string.IsNullOrWhiteSpace(driver.UserUid))
     {
+        // Phase 3: Audit failed assignment (missing UserUid)
+        await auditLogger.LogFailureAsync(
+            context.User,
+            AuditActions.DriverAssigned,
+            "Booking",
+            bookingId,
+            errorMessage: "Driver missing UserUid",
+            details: new { driverId = driver.Id, driverName = driver.Name },
+            httpContext: context);
+
         return Results.BadRequest(new 
         { 
             error = "Cannot assign driver without a UserUid. Please link the driver to an AuthServer user first.",
@@ -1797,6 +2098,23 @@ app.MapPost("/bookings/{bookingId}/assign-driver", async (
         driver.Id,
         driver.UserUid,
         driver.Name);
+
+    // Phase 3: Audit successful driver assignment
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.DriverAssigned,
+        "Booking",
+        bookingId,
+        details: new {
+            driverId = driver.Id,
+            driverName = driver.Name,
+            driverUid = driver.UserUid,
+            affiliateId = affiliate.Id,
+            affiliateName = affiliate.Name,
+            passengerName = booking.PassengerName,
+            pickupDateTime = booking.PickupDateTime
+        },
+        httpContext: context);
 
     // Send email notification to affiliate
     try
@@ -1828,8 +2146,10 @@ app.MapPost("/bookings/{bookingId}/assign-driver", async (
 
 // POST /dev/seed-affiliates - Seed test affiliates and drivers (DEV ONLY)
 app.MapPost("/dev/seed-affiliates", async (
+    HttpContext context,
     IAffiliateRepository affiliateRepo,
-    IDriverRepository driverRepo) =>
+    IDriverRepository driverRepo,
+    AuditLogger auditLogger) =>
 {
     // Define affiliates (without embedded drivers - they're stored separately)
     var affiliates = new[]
@@ -1896,6 +2216,18 @@ app.MapPost("/dev/seed-affiliates", async (
     foreach (var driver in drivers)
         await driverRepo.AddAsync(driver);
 
+    // Phase 3: Audit seed action
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.AffiliateCreated,
+        "Affiliate",
+        details: new { 
+            affiliatesCount = affiliates.Length,
+            driversCount = drivers.Length,
+            action = "bulk_seed"
+        },
+        httpContext: context);
+
     return Results.Ok(new 
     { 
         affiliatesAdded = affiliates.Length, 
@@ -1910,6 +2242,128 @@ app.MapPost("/dev/seed-affiliates", async (
 // ===================================================================
 // PHASE 2: OAUTH CREDENTIAL MANAGEMENT ENDPOINTS
 // ===================================================================
+
+// GET /api/admin/oauth - Get current OAuth credentials (secret masked)
+app.MapGet("/api/admin/oauth", async (
+    OAuthCredentialService oauthService,
+    AuditLogger auditLogger,
+    HttpContext context) =>
+{
+    var credentials = await oauthService.GetCredentialsAsync();
+    
+    // Phase 3: Audit credential view (sensitive operation)
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.OAuthCredentialsViewed,
+        "OAuth",
+        "default",
+        httpContext: context);
+
+    if (credentials == null)
+    {
+        return Results.Ok(new
+        {
+            configured = false,
+            message = "OAuth credentials not configured. Use PUT /api/admin/oauth to set them."
+        });
+    }
+
+    // Return masked response (never expose full secret)
+    var response = new OAuthCredentialsResponseDto
+    {
+        ClientId = credentials.ClientId,
+        ClientSecretMasked = MaskSecret(credentials.ClientSecret),
+        LastUpdatedUtc = credentials.LastUpdatedUtc,
+        LastUpdatedBy = credentials.LastUpdatedBy,
+        Description = credentials.Description
+    };
+
+    return Results.Ok(new
+    {
+        configured = true,
+        credentials = response
+    });
+})
+.WithName("GetOAuthCredentials")
+.RequireAuthorization("AdminOnly") // Phase 2: Only admins can view credentials
+.WithTags("Admin", "OAuth");
+
+
+// PUT /api/admin/oauth - Update OAuth credentials
+app.MapPut("/api/admin/oauth", async (
+    [FromBody] UpdateOAuthCredentialsRequest request,
+    HttpContext context,
+    OAuthCredentialService oauthService,
+    AuditLogger auditLogger,
+    ILoggerFactory loggerFactory) =>
+{
+    var log = loggerFactory.CreateLogger("oauth");
+    
+    // Validate request
+    if (string.IsNullOrWhiteSpace(request.ClientId) || 
+        string.IsNullOrWhiteSpace(request.ClientSecret))
+    {
+        // Phase 3: Audit failed update (validation error)
+        await auditLogger.LogAsync(
+            context.User,
+            AuditActions.OAuthCredentialsUpdated,
+            "OAuth",
+            "default",
+            httpContext: context,
+            result: AuditLogResult.ValidationError,
+            errorMessage: "ClientId and ClientSecret are required");
+
+        return Results.BadRequest(new 
+        { 
+            error = "Both ClientId and ClientSecret are required" 
+        });
+    }
+
+    // Get admin username for audit trail
+    var adminUsername = context.User.FindFirst("sub")?.Value ?? "unknown";
+
+    // Update credentials (encrypts before storage, invalidates cache)
+    var credentials = new OAuthClientCredentials
+    {
+        Id = "default",
+        ClientId = request.ClientId,
+        ClientSecret = request.ClientSecret,
+        Description = request.Description
+    };
+
+    await oauthService.UpdateCredentialsAsync(credentials, adminUsername);
+
+    // Phase 3: Audit successful credential update (CRITICAL - never log actual secret!)
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.OAuthCredentialsUpdated,
+        "OAuth",
+        "default",
+        details: new {
+            clientId = credentials.ClientId,
+            clientSecretMasked = MaskSecret(credentials.ClientSecret),
+            description = request.Description,
+            updatedBy = adminUsername
+        },
+        httpContext: context);
+
+    log.LogInformation("OAuth credentials updated by admin {AdminUsername}", adminUsername);
+
+    // Return success with masked secret
+    return Results.Ok(new
+    {
+        message = "OAuth credentials updated successfully",
+        clientId = credentials.ClientId,
+        clientSecretMasked = MaskSecret(credentials.ClientSecret),
+        updatedBy = adminUsername,
+        updatedAt = DateTime.UtcNow,
+        note = "Cache invalidated. New credentials will be used for all future API calls."
+    });
+})
+.WithName("UpdateOAuthCredentials")
+.RequireAuthorization("AdminOnly") // Phase 2: Only admins can update credentials
+.WithTags("Admin", "OAuth");
+
 
 // ===================================================================
 // PHASE 3: AUDIT LOG ENDPOINTS (Admin-Only)
@@ -2017,7 +2471,3 @@ app.MapDelete("/api/admin/audit-logs/cleanup", async (
 .WithName("CleanupAuditLogs")
 .RequireAuthorization("AdminOnly")
 .WithTags("Admin", "Audit");
-
-// ===================================================================
-// PHASE 2: OAUTH CREDENTIAL MANAGEMENT ENDPOINTS
-// ===================================================================
