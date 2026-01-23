@@ -1269,6 +1269,55 @@ Content-Type: application/json
 
 ---
 
+### PUT /api/admin/users/{username}/role
+
+**Description**: Update user role (proxy to AuthServer)
+
+**Auth**: `AdminOnly`
+
+**Request**:
+```http
+PUT /api/admin/users/{username}/role HTTP/1.1
+Host: localhost:5206
+Authorization: Bearer {adminToken}
+Content-Type: application/json
+
+{
+  "role": "dispatcher"
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "message": "Successfully assigned role 'dispatcher' to user 'diana'.",
+  "username": "diana",
+  "previousRoles": ["booker"],
+  "newRole": "dispatcher"
+}
+```
+
+**Side Effects**:
+- User's role updated in AuthServer
+- Previous roles removed (mutually exclusive)
+- **Audit log created** in AdminAPI
+- User must re-login to get new role in JWT
+
+**Valid Roles**:
+- `admin` - Full system access
+- `dispatcher` - Operational access (bookings, quotes, drivers)
+- `booker` - Passenger/booker access
+- `driver` - Driver app access
+
+**Error Responses**:
+- **400 Bad Request**: Invalid role or missing role field
+- **404 Not Found**: User doesn't exist
+- **500 Internal Server Error**: AuthServer communication failure
+
+**Note**: This endpoint proxies to AuthServer at `https://localhost:5001`. Ensure AuthServer is running.
+
+---
+
 ## ?? HTTP Status Codes
 
 | Code | Meaning | Common Causes |

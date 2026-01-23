@@ -1,0 +1,23 @@
+[
+  {
+    "Id": "ac312f98fe434c24b7d45bac1aea801c",
+    "Name": "Chicago Limo Service",
+    "PointOfContact": "John Smith",
+    "Phone": "312-555-1234",
+    "Email": "dispatch@chicagolimo.com",
+    "StreetAddress": "123 Main St",
+    "City": "Chicago",
+    "State": "IL",
+    "Drivers": []
+  },
+  {
+    "Id": "d4547d01e91f4c63817c8baa83db3621",
+    "Name": "Suburban Chauffeurs",
+    "PointOfContact": "Emily Davis",
+    "Phone": "847-555-9876",
+    "Email": "emily@suburbanchauffeurs.com",
+    "City": "Naperville",
+    "State": "IL",
+    "Drivers": []
+  }
+]

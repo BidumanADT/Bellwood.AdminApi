@@ -56,6 +56,9 @@ builder.Services.AddMemoryCache(); // For credential caching
 builder.Services.AddSingleton<IOAuthCredentialRepository, FileOAuthCredentialRepository>();
 builder.Services.AddSingleton<OAuthCredentialService>();
 
+// Phase 4: LimoAnywhere integration (stub implementation)
+builder.Services.AddSingleton<ILimoAnywhereService, LimoAnywhereServiceStub>();
+
 // Location tracking service (in-memory)
 builder.Services.AddSingleton<ILocationService, InMemoryLocationService>();
 
@@ -103,6 +106,11 @@ builder.Services.AddAuthentication(options =>
         RoleClaimType = "role",      // Map "role" claim to roles
         NameClaimType = "sub"        // Map "sub" claim to username
     };
+    
+    // CRITICAL FIX: Manually set the claim types on the token validation parameters
+    // This ensures User.IsInRole() works correctly
+    options.TokenValidationParameters.RoleClaimType = "role";
+    options.TokenValidationParameters.NameClaimType = "sub";
     
     // Add authentication event handlers for debugging and SignalR support
     options.Events = new JwtBearerEvents
@@ -170,6 +178,16 @@ builder.Services.AddAuthentication(options =>
             var roles = context.Principal?.FindAll("role").Select(c => c.Value).ToList();
             Console.WriteLine($"   Roles: {(roles?.Any() == true ? string.Join(", ", roles) : "NONE")}");
             
+            // DIAGNOSTIC: Test User.IsInRole() directly
+            var isAdmin = context.Principal?.IsInRole("admin") ?? false;
+            var isDispatcher = context.Principal?.IsInRole("dispatcher") ?? false;
+            Console.WriteLine($"   IsInRole('admin'): {isAdmin}");
+            Console.WriteLine($"   IsInRole('dispatcher'): {isDispatcher}");
+            
+            // DIAGNOSTIC: Show all claims
+            var allClaims = context.Principal?.Claims.Select(c => $"{c.Type}={c.Value}").ToList();
+            Console.WriteLine($"   All Claims: {string.Join(", ", allClaims ?? new List<string>())}");
+
             return Task.CompletedTask;
         }
     };
@@ -2641,7 +2659,28 @@ app.MapPost("/api/admin/data-protection/test", (
 .RequireAuthorization("AdminOnly")
 .WithTags("Admin", "DataProtection");
 
+// ===================================================================
+// START APPLICATION
+// ===================================================================
+
+Console.WriteLine("? Bellwood AdminAPI starting...");
+Console.WriteLine($"   Environment: {app.Environment.EnvironmentName}");
+Console.WriteLine($"   Listening on: https://localhost:5206");
+
+app.Run();
+
+Console.WriteLine("? Bellwood AdminAPI stopped.");
 
 // ===================================================================
-// PHASE 2: OAUTH CREDENTIAL MANAGEMENT ENDPOINTS
+// DTOs
 // ===================================================================
+
+// Role assignment request DTO
+public record RoleAssignmentRequest(string Role);
+
+// Role assignment response DTO (from AuthServer)
+public record RoleAssignmentResponse(
+    string Message,
+    string Username,
+    IEnumerable<string> PreviousRoles,
+    string NewRole);
