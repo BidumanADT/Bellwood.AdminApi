@@ -88,6 +88,34 @@ public sealed class FileBookingRepository : IBookingRepository
         finally { _gate.Release(); }
     }
 
+    /// <summary>
+    /// Update status with audit trail tracking.
+    /// Phase 1: Records who made the change and when.
+    /// </summary>
+    public async Task UpdateStatusAsync(string id, BookingStatus status, string? modifiedByUserId, CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync();
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var list = await ReadAllAsync();
+            var rec = list.FirstOrDefault(x => x.Id == id);
+            if (rec is null) return;
+            
+            rec.Status = status;
+            
+            // Phase 1: Track who modified the record and when
+            if (!string.IsNullOrEmpty(modifiedByUserId))
+            {
+                rec.ModifiedByUserId = modifiedByUserId;
+                rec.ModifiedOnUtc = DateTime.UtcNow;
+            }
+            
+            await WriteAllAsync(list);
+        }
+        finally { _gate.Release(); }
+    }
+
     public async Task UpdateRideStatusAsync(string id, RideStatus rideStatus, BookingStatus bookingStatus, CancellationToken ct = default)
     {
         await EnsureInitializedAsync();

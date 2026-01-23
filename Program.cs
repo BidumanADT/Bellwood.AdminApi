@@ -3,18 +3,33 @@ using System.Text.Json.Serialization;
 using Bellwood.AdminApi.Models;
 using Bellwood.AdminApi.Services;
 using Bellwood.AdminApi.Hubs;
+using Bellwood.AdminApi.Middleware;
 using BellwoodGlobal.Mobile.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using System.Text.Json;
+
+// Phase 1: Use static import for authorization helper methods
+using static Bellwood.AdminApi.Services.UserAuthorizationHelper;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // ===================================================================
 // SERVICE REGISTRATION
 // ===================================================================
+
+// Phase 3: Application Insights for production monitoring
+builder.Services.AddApplicationInsightsTelemetry(options =>
+{
+    // Configuration will come from appsettings.json or environment variables
+    // For local development, this can be disabled or use a development instrumentation key
+    options.ConnectionString = builder.Configuration["ApplicationInsights:ConnectionString"];
+});
 
 // Email configuration and sender
 builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection("Email"));
@@ -25,6 +40,24 @@ builder.Services.AddSingleton<IQuoteRepository, FileQuoteRepository>();
 builder.Services.AddSingleton<IBookingRepository, FileBookingRepository>();
 builder.Services.AddSingleton<IAffiliateRepository, FileAffiliateRepository>();
 builder.Services.AddSingleton<IDriverRepository, FileDriverRepository>();
+
+// Phase 3: Audit log repository and logger service
+builder.Services.AddSingleton<IAuditLogRepository, FileAuditLogRepository>();
+builder.Services.AddSingleton<AuditLogger>();
+
+// Phase 3C: Data protection services
+builder.Services.AddSingleton<ISensitiveDataProtector, SensitiveDataProtector>();
+builder.Services.AddSingleton<IDataRetentionService, DataRetentionService>();
+builder.Services.AddHostedService<DataRetentionBackgroundService>();
+
+// Phase 2: OAuth credential management
+builder.Services.AddDataProtection(); // ASP.NET Core Data Protection API
+builder.Services.AddMemoryCache(); // For credential caching
+builder.Services.AddSingleton<IOAuthCredentialRepository, FileOAuthCredentialRepository>();
+builder.Services.AddSingleton<OAuthCredentialService>();
+
+// Phase 4: LimoAnywhere integration (stub implementation)
+builder.Services.AddSingleton<ILimoAnywhereService, LimoAnywhereServiceStub>();
 
 // Location tracking service (in-memory)
 builder.Services.AddSingleton<ILocationService, InMemoryLocationService>();
@@ -37,6 +70,10 @@ builder.Services.AddSignalR(options =>
 
 // Background service for broadcasting location updates via SignalR
 builder.Services.AddHostedService<LocationBroadcastService>();
+
+// Phase 3: Enhanced health checks
+builder.Services.AddHealthChecks()
+    .AddCheck<AdminApiHealthCheck>("AdminAPI", tags: new[] { "ready", "live" });
 
 // API documentation
 builder.Services.AddEndpointsApiExplorer();
@@ -69,6 +106,11 @@ builder.Services.AddAuthentication(options =>
         RoleClaimType = "role",      // Map "role" claim to roles
         NameClaimType = "sub"        // Map "sub" claim to username
     };
+    
+    // CRITICAL FIX: Manually set the claim types on the token validation parameters
+    // This ensures User.IsInRole() works correctly
+    options.TokenValidationParameters.RoleClaimType = "role";
+    options.TokenValidationParameters.NameClaimType = "sub";
     
     // Add authentication event handlers for debugging and SignalR support
     options.Events = new JwtBearerEvents
@@ -136,6 +178,16 @@ builder.Services.AddAuthentication(options =>
             var roles = context.Principal?.FindAll("role").Select(c => c.Value).ToList();
             Console.WriteLine($"   Roles: {(roles?.Any() == true ? string.Join(", ", roles) : "NONE")}");
             
+            // DIAGNOSTIC: Test User.IsInRole() directly
+            var isAdmin = context.Principal?.IsInRole("admin") ?? false;
+            var isDispatcher = context.Principal?.IsInRole("dispatcher") ?? false;
+            Console.WriteLine($"   IsInRole('admin'): {isAdmin}");
+            Console.WriteLine($"   IsInRole('dispatcher'): {isDispatcher}");
+            
+            // DIAGNOSTIC: Show all claims
+            var allClaims = context.Principal?.Claims.Select(c => $"{c.Type}={c.Value}").ToList();
+            Console.WriteLine($"   All Claims: {string.Join(", ", allClaims ?? new List<string>())}");
+
             return Task.CompletedTask;
         }
     };
@@ -144,8 +196,21 @@ builder.Services.AddAuthentication(options =>
 // Register authorization with driver policy:
 builder.Services.AddAuthorization(options =>
 {
+    // Phase 1: Driver policy
     options.AddPolicy("DriverOnly", policy =>
         policy.RequireRole("driver"));
+    
+    // Phase 2: Admin-only policy (sensitive operations)
+    options.AddPolicy("AdminOnly", policy =>
+        policy.RequireRole("admin"));
+    
+    // Phase 2: Staff policy (admin OR dispatcher - operational access)
+    options.AddPolicy("StaffOnly", policy =>
+        policy.RequireRole("admin", "dispatcher"));
+    
+    // Phase 2: Booker policy (optional - for future use)
+    options.AddPolicy("BookerOnly", policy =>
+        policy.RequireRole("booker"));
 });
 
 // CORS for development
@@ -171,6 +236,9 @@ var app = builder.Build();
 
 app.UseCors();
 
+// Phase 3: Error tracking middleware (before authentication to track all errors)
+app.UseMiddleware<ErrorTrackingMiddleware>();
+
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -190,14 +258,54 @@ if (app.Environment.IsDevelopment())
 // Health check endpoint
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
+// Phase 3: Enhanced health check endpoints
+app.MapHealthChecks("/health/live", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("live"),
+    ResponseWriter = WriteHealthCheckResponse
+});
+
+app.MapHealthChecks("/health/ready", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("ready"),
+    ResponseWriter = WriteHealthCheckResponse
+});
+
+// Helper: Write detailed health check response as JSON
+static async Task WriteHealthCheckResponse(HttpContext context, HealthReport report)
+{
+    context.Response.ContentType = "application/json";
+
+    var result = JsonSerializer.Serialize(new
+    {
+        status = report.Status.ToString(),
+        timestamp = DateTime.UtcNow,
+        duration = report.TotalDuration.TotalMilliseconds,
+        checks = report.Entries.Select(e => new
+        {
+            name = e.Key,
+            status = e.Value.Status.ToString(),
+            description = e.Value.Description,
+            duration = e.Value.Duration.TotalMilliseconds,
+            exception = e.Value.Exception?.Message,
+            data = e.Value.Data
+        })
+    }, new JsonSerializerOptions { WriteIndented = true });
+
+    await context.Response.WriteAsync(result);
+}
+
 // ===================================================================
 // QUOTE ENDPOINTS
 // ===================================================================
 
 // POST /quotes/seed - Seed sample quotes (DEV ONLY)
-app.MapPost("/quotes/seed", async (IQuoteRepository repo) =>
+app.MapPost("/quotes/seed", async (HttpContext context, IQuoteRepository repo, AuditLogger auditLogger) =>
 {
     var now = DateTime.UtcNow;
+    
+    // Phase 1: Capture the authenticated user's ID for seed data
+    var createdByUserId = GetUserId(context.User);
 
     var samples = new[]
     {
@@ -221,7 +329,9 @@ app.MapPost("/quotes/seed", async (IQuoteRepository repo) =>
                 DropoffLocation = "O'Hare International Airport",
                 RoundTrip = false,
                 PassengerCount = 2, CheckedBags = 2, CarryOnBags = 1
-            }
+            },
+            // Phase 1: Set ownership on seeded data
+            CreatedByUserId = createdByUserId
         },
         new QuoteRecord {
             CreatedUtc = now.AddMinutes(-10),
@@ -242,7 +352,8 @@ app.MapPost("/quotes/seed", async (IQuoteRepository repo) =>
                 PickupSignText = "CHEN / Bellwood",
                 DropoffLocation = "Downtown Chicago",
                 PassengerCount = 3, CheckedBags = 3, CarryOnBags = 2
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         new QuoteRecord {
             CreatedUtc = now.AddHours(-1),
@@ -262,7 +373,8 @@ app.MapPost("/quotes/seed", async (IQuoteRepository repo) =>
                 PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "The Langham Hotel",
                 PassengerCount = 2
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         new QuoteRecord {
             CreatedUtc = now.AddHours(-2),
@@ -283,7 +395,8 @@ app.MapPost("/quotes/seed", async (IQuoteRepository repo) =>
                 PickupSignText = "PARK / Bellwood",
                 DropoffLocation = "Indiana Dunes State Park",
                 PassengerCount = 6, CheckedBags = 4, CarryOnBags = 6
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         new QuoteRecord {
             CreatedUtc = now.AddHours(-3),
@@ -303,29 +416,46 @@ app.MapPost("/quotes/seed", async (IQuoteRepository repo) =>
                 PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "Langham Hotel",
                 PassengerCount = 4
-            }
+            },
+            CreatedByUserId = createdByUserId
         }
     };
 
     foreach (var r in samples)
         await repo.AddAsync(r);
 
-    return Results.Ok(new { added = samples.Length });
+    // Phase 3: Audit log the seed action
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.QuoteCreated,
+        "Quote",
+        details: new { count = samples.Length, action = "bulk_seed" },
+        httpContext: context);
+
+    return Results.Ok(new { 
+        added = samples.Length,
+        createdByUserId = createdByUserId ?? "(null - legacy data)"
+    });
 })
 .WithName("SeedQuotes")
-.RequireAuthorization();
+.RequireAuthorization("AdminOnly"); // Phase 2: Only admins can seed data
 
 // POST /quotes - Submit a new quote request
 app.MapPost("/quotes", async (
     [FromBody] QuoteDraft draft,
+    HttpContext context,
     IEmailSender email,
     IQuoteRepository repo,
+    AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
 {
     var log = loggerFactory.CreateLogger("quotes");
 
     if (draft is null || string.IsNullOrWhiteSpace(draft.PickupLocation))
         return Results.BadRequest(new { error = "Invalid payload" });
+
+    // Phase 1: Capture the user who created this quote for ownership tracking
+    var currentUserId = GetUserId(context.User);
 
     var rec = new QuoteRecord
     {
@@ -335,15 +465,31 @@ app.MapPost("/quotes", async (
         PickupLocation = draft.PickupLocation,
         DropoffLocation = draft.DropoffLocation,
         PickupDateTime = draft.PickupDateTime,
-        Draft = draft
+        Draft = draft,
+        // Phase 1: Set ownership field
+        CreatedByUserId = currentUserId
     };
 
     await repo.AddAsync(rec);
 
+    // Phase 3: Audit log quote creation
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.QuoteCreated,
+        "Quote",
+        rec.Id,
+        details: new { 
+            passengerName = rec.PassengerName,
+            vehicleClass = rec.VehicleClass,
+            pickupLocation = rec.PickupLocation
+        },
+        httpContext: context);
+
     try
     {
         await email.SendQuoteAsync(draft, rec.Id);
-        log.LogInformation("Quote {Id} submitted for {Passenger}", rec.Id, rec.PassengerName);
+        log.LogInformation("Quote {Id} submitted for {Passenger} by user {UserId}", 
+            rec.Id, rec.PassengerName, currentUserId ?? "unknown");
     }
     catch (Exception ex)
     {
@@ -357,12 +503,34 @@ app.MapPost("/quotes", async (
 .RequireAuthorization();
 
 // GET /quotes/list - List recent quotes (paginated)
-app.MapGet("/quotes/list", async ([FromQuery] int take, IQuoteRepository repo) =>
+app.MapGet("/quotes/list", async ([FromQuery] int take, HttpContext context, IQuoteRepository repo) =>
 {
     take = (take <= 0 || take > 200) ? 50 : take;
     var rows = await repo.ListAsync(take);
 
-    var list = rows.Select(r => new {
+    // Phase 1: Filter quotes based on user role
+    // - Staff (admin/dispatcher): See all quotes
+    // - Bookers: Only see quotes they created
+    // - Drivers: See no quotes (they don't use this endpoint)
+    var user = context.User;
+    var currentUserId = GetUserId(user);
+    
+    IEnumerable<QuoteRecord> filteredRows;
+    if (IsStaffOrAdmin(user))
+    {
+        // Staff sees all quotes
+        filteredRows = rows;
+    }
+    else
+    {
+        // Non-staff users only see their own quotes
+        // Legacy records (null CreatedByUserId) are hidden from non-staff
+        filteredRows = rows.Where(r => 
+            !string.IsNullOrEmpty(r.CreatedByUserId) && 
+            r.CreatedByUserId == currentUserId);
+    }
+
+    var list = filteredRows.Select(r => new {
         r.Id,
         r.CreatedUtc,
         r.Status,
@@ -377,25 +545,108 @@ app.MapGet("/quotes/list", async ([FromQuery] int take, IQuoteRepository repo) =
     return Results.Ok(list);
 })
 .WithName("ListQuotes")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly"); // Phase 2: Changed from generic auth to StaffOnly
 
 // GET /quotes/{id} - Get detailed quote by ID
-app.MapGet("/quotes/{id}", async (string id, IQuoteRepository repo) =>
+app.MapGet("/quotes/{id}", async (string id, HttpContext context, IQuoteRepository repo, AuditLogger auditLogger) =>
 {
     var rec = await repo.GetAsync(id);
-    return rec is null ? Results.NotFound() : Results.Ok(rec);
+    if (rec is null) 
+        return Results.NotFound();
+    
+    // Phase 1: Verify user has access to this quote
+    // - Staff (admin/dispatcher): Full access
+    // - Bookers: Only their own quotes (CreatedByUserId match)
+    // - Drivers: No access to quotes
+    var user = context.User;
+    
+    // FIX: Staff can access all records (including legacy)
+    if (!IsStaffOrAdmin(user))
+    {
+        // Non-staff: Must check ownership
+        var currentUserId = GetUserId(user);
+        
+        // Legacy records (null CreatedByUserId) are not accessible to non-staff
+        if (string.IsNullOrEmpty(rec.CreatedByUserId))
+        {
+            // Phase 3: Audit forbidden access attempt
+            await auditLogger.LogForbiddenAsync(
+                user,
+                AuditActions.QuoteViewed,
+                "Quote",
+                id,
+                httpContext: context);
+
+            return Results.Problem(
+                statusCode: 403,
+                title: "Forbidden",
+                detail: "You do not have permission to view this quote");
+        }
+        
+        // Check if user owns this record
+        if (rec.CreatedByUserId != currentUserId)
+        {
+            // Phase 3: Audit forbidden access attempt
+            await auditLogger.LogForbiddenAsync(
+                user,
+                AuditActions.QuoteViewed,
+                "Quote",
+                id,
+                httpContext: context);
+
+            return Results.Problem(
+                statusCode: 403,
+                title: "Forbidden",
+                detail: "You do not have permission to view this quote");
+        }
+    }
+    
+    // Phase 3: Audit successful quote view
+    await auditLogger.LogSuccessAsync(
+        user,
+        AuditActions.QuoteViewed,
+        "Quote",
+        id,
+        httpContext: context);
+
+    // Phase 2: Build response DTO with billing fields
+    var response = new QuoteDetailResponseDto
+    {
+        Id = rec.Id,
+        Status = rec.Status.ToString(),
+        CreatedUtc = rec.CreatedUtc,
+        BookerName = rec.BookerName,
+        PassengerName = rec.PassengerName,
+        VehicleClass = rec.VehicleClass,
+        PickupLocation = rec.PickupLocation,
+        DropoffLocation = rec.DropoffLocation,
+        PickupDateTime = rec.PickupDateTime,
+        Draft = rec.Draft,
+        
+        // Phase 2: Billing fields (currently null - will be populated in Phase 3+)
+        EstimatedCost = null,  // TODO: Populate when pricing integration added
+        BillingNotes = null    // TODO: Populate when billing notes added
+    };
+    
+    // Phase 2: Mask billing fields for dispatchers
+    MaskBillingFields(user, response);
+    
+    return Results.Ok(response);
 })
 .WithName("GetQuote")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly"); // Phase 2: Changed from generic auth to StaffOnly
 
 // ===================================================================
 // BOOKING ENDPOINTS
 // ===================================================================
 
 // POST /bookings/seed - Seed sample bookings (DEV ONLY)
-app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
+app.MapPost("/bookings/seed", async (HttpContext context, IBookingRepository repo, AuditLogger auditLogger) =>
 {
     var now = DateTime.UtcNow;
+    
+    // Phase 1: Capture the authenticated user's ID for seed data
+    var createdByUserId = GetUserId(context.User);
 
     var samples = new[]
     {
@@ -418,7 +669,8 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
                 PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "Willis Tower",
                 PassengerCount = 1, CheckedBags = 1, CarryOnBags = 1
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         // Confirmed - Staff approved booking
         new BookingRecord {
@@ -439,7 +691,8 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
                 PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "Midway Airport",
                 PassengerCount = 3, CheckedBags = 3, CarryOnBags = 2
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         // Scheduled - Charlie's first ride (5 hours from now)
         new BookingRecord {
@@ -464,7 +717,8 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
                 PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "Midway Airport",
                 PassengerCount = 1, CheckedBags = 1
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         // Scheduled - Charlie's second ride (48 hours from now)
         new BookingRecord {
@@ -482,7 +736,7 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
             PickupDateTime = now.AddHours(48),
             Draft = new BellwoodGlobal.Mobile.Models.QuoteDraft {
                 Booker = new() { FirstName="David", LastName="Miller", PhoneNumber = "312-555-7777", EmailAddress = "david.miller@example.com" },
-                Passenger = new() { FirstName="Emma", LastName="Watson", PhoneNumber = "312-555-8888", EmailAddress = "emma.watson@example.com" },
+                Passenger = new() { FirstName="Emma", LastName = "Watson", PhoneNumber = "312-555-8888", EmailAddress = "emma.watson@example.com" },
                 VehicleClass = "S-Class",
                 PickupDateTime = now.AddHours(48),
                 PickupLocation = "O'Hare FBO",
@@ -490,7 +744,8 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
                 PickupSignText = "WATSON / Bellwood",
                 DropoffLocation = "Peninsula Hotel, Chicago",
                 PassengerCount = 2, CheckedBags = 2, CarryOnBags = 1
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         // InProgress - Driver has picked up passenger
         new BookingRecord {
@@ -516,7 +771,8 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
                 PickupSignText = "REED / Bellwood",
                 DropoffLocation = "Downtown Chicago",
                 PassengerCount = 2, CheckedBags = 2, CarryOnBags = 2
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         // Completed - Ride finished successfully
         new BookingRecord {
@@ -541,7 +797,8 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
                 PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "Navy Pier",
                 PassengerCount = 2
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         // Cancelled - Booking was cancelled
         new BookingRecord {
@@ -567,7 +824,8 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
                 PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "Naperville",
                 PassengerCount = 1
-            }
+            },
+            CreatedByUserId = createdByUserId
         },
         // NoShow - Passenger didn't show up
         new BookingRecord {
@@ -592,29 +850,46 @@ app.MapPost("/bookings/seed", async (IBookingRepository repo) =>
                 PickupStyle = BellwoodGlobal.Mobile.Models.PickupStyle.Curbside,
                 DropoffLocation = "O'Hare Airport",
                 PassengerCount = 2
-            }
+            },
+            CreatedByUserId = createdByUserId  // FIX: Add missing ownership field
         }
     };
 
     foreach (var r in samples)
         await repo.AddAsync(r);
 
-    return Results.Ok(new { added = samples.Length });
+    // Phase 3: Audit log the seed action
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.BookingCreated,
+        "Booking",
+        details: new { count = samples.Length, action = "bulk_seed" },
+        httpContext: context);
+
+    return Results.Ok(new { 
+        added = samples.Length,
+        createdByUserId = createdByUserId ?? "(null - legacy data)"  // FIX: Add to response
+    });
 })
 .WithName("SeedBookings")
-.RequireAuthorization();
+.RequireAuthorization("AdminOnly"); // Phase 2: Only admins can seed data
 
 // POST /bookings - Submit a new booking request
 app.MapPost("/bookings", async (
     [FromBody] QuoteDraft draft,
+    HttpContext context,
     IEmailSender email,
     IBookingRepository repo,
+    AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
 {
     var log = loggerFactory.CreateLogger("bookings");
 
     if (draft is null || string.IsNullOrWhiteSpace(draft.PickupLocation))
         return Results.BadRequest(new { error = "Invalid payload" });
+
+    // Phase 1: Capture the user who created this booking for ownership tracking
+    var currentUserId = GetUserId(context.User);
 
     var rec = new BookingRecord
     {
@@ -624,15 +899,32 @@ app.MapPost("/bookings", async (
         PickupLocation = draft.PickupLocation,
         DropoffLocation = draft.DropoffLocation,
         PickupDateTime = draft.PickupDateTime,
-        Draft = draft
+        Draft = draft,
+        // Phase 1: Set ownership field
+        CreatedByUserId = currentUserId
     };
 
     await repo.AddAsync(rec);
 
+    // Phase 3: Audit log booking creation
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.BookingCreated,
+        "Booking",
+        rec.Id,
+        details: new {
+            passengerName = rec.PassengerName,
+            vehicleClass = rec.VehicleClass,
+            pickupLocation = rec.PickupLocation,
+            pickupDateTime = rec.PickupDateTime
+        },
+        httpContext: context);
+
     try
     {
         await email.SendBookingAsync(draft, rec.Id);
-        log.LogInformation("Booking {Id} submitted for {Passenger}", rec.Id, rec.PassengerName);
+        log.LogInformation("Booking {Id} submitted for {Passenger} by user {UserId}", 
+            rec.Id, rec.PassengerName, currentUserId ?? "unknown");
     }
     catch (Exception ex)
     {
@@ -651,11 +943,42 @@ app.MapGet("/bookings/list", async ([FromQuery] int take, HttpContext context, I
     take = (take <= 0 || take > 200) ? 50 : take;
     var rows = await repo.ListAsync(take);
     
+    // Phase 1: Filter bookings based on user role
+    // - Staff (admin/dispatcher): See all bookings
+    // - Drivers: See only bookings assigned to them
+    // - Bookers: Only see their own bookings
+    var user = context.User;
+    var currentUserId = GetUserId(user);
+    
+    IEnumerable<BookingRecord> filteredRows;
+    if (IsStaffOrAdmin(user))
+    {
+        // Staff sees all bookings
+        filteredRows = rows;
+    }
+    else if (IsDriver(user))
+    {
+        // Drivers see only their assigned bookings
+        // Note: Drivers should use /driver/rides/today instead, but this is a safety measure
+        var driverUid = user.FindFirst("uid")?.Value;
+        filteredRows = rows.Where(r => 
+            !string.IsNullOrEmpty(r.AssignedDriverUid) && 
+            r.AssignedDriverUid == driverUid);
+    }
+    else
+    {
+        // Bookers only see their own bookings
+        // Legacy records (null CreatedByUserId) are hidden from non-staff
+        filteredRows = rows.Where(r => 
+            !string.IsNullOrEmpty(r.CreatedByUserId) && 
+            r.CreatedByUserId == currentUserId);
+    }
+    
     // Get user's timezone for PickupDateTimeOffset conversion
     // Default to Central Time for admin users who don't send X-Timezone-Id header
     var userTz = GetRequestTimeZone(context);
 
-    var list = rows.Select(r =>
+    var list = filteredRows.Select(r =>
     {
         // FIX: Handle DateTime.Kind for PickupDateTimeOffset
         DateTimeOffset pickupOffset;
@@ -702,14 +1025,44 @@ app.MapGet("/bookings/list", async ([FromQuery] int take, HttpContext context, I
     return Results.Ok(list);
 })
 .WithName("ListBookings")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly"); // Phase 2: Changed from generic auth to StaffOnly
 
 // GET /bookings/{id} - Get detailed booking by ID
-app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepository repo) =>
+app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepository repo, AuditLogger auditLogger) =>
 {
     var rec = await repo.GetAsync(id);
     if (rec is null) return Results.NotFound();
     
+    // Phase 1: Verify user has access to this booking
+    // - Staff (admin/dispatcher): Full access
+    // - Drivers: Only their assigned bookings
+    // - Bookers: Only their own bookings (CreatedByUserId match)
+    var user = context.User;
+    
+    if (!CanAccessBooking(user, rec.CreatedByUserId, rec.AssignedDriverUid))
+    {
+        // Phase 3: Audit forbidden access attempt
+        await auditLogger.LogForbiddenAsync(
+            user,
+            AuditActions.BookingViewed,
+            "Booking",
+            id,
+            httpContext: context);
+
+        return Results.Problem(
+            statusCode: 403,
+            title: "Forbidden",
+            detail: "You do not have permission to view this booking");
+    }
+    
+    // Phase 3: Audit successful booking view
+    await auditLogger.LogSuccessAsync(
+        user,
+        AuditActions.BookingViewed,
+        "Booking",
+        id,
+        httpContext: context);
+
     // Get user's timezone for PickupDateTimeOffset conversion
     var userTz = GetRequestTimeZone(context);
     
@@ -732,31 +1085,41 @@ app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepo
     var createdLocal = TimeZoneInfo.ConvertTimeFromUtc(rec.CreatedUtc, userTz);
     var createdOffset = new DateTimeOffset(createdLocal, userTz.GetUtcOffset(createdLocal));
 
-    return Results.Ok(new
+    // Phase 2: Build response DTO with billing fields
+    var response = new BookingDetailResponseDto
     {
-        rec.Id,
-        rec.CreatedUtc, // Keep for backward compatibility
-        CreatedDateTimeOffset = createdOffset, // Add timezone-aware version
+        Id = rec.Id,
         Status = rec.Status.ToString(),
-        // FIX: Include CurrentRideStatus for real-time driver progress
         CurrentRideStatus = rec.CurrentRideStatus?.ToString(),
-        rec.BookerName,
-        rec.PassengerName,
-        rec.VehicleClass,
-        rec.PickupLocation,
-        rec.DropoffLocation,
-        // Keep old property for backward compatibility
-        rec.PickupDateTime,
-        // FIX: Add PickupDateTimeOffset for correct timezone display
-        PickupDateTimeOffset = pickupOffset,
-        rec.Draft,
+        CreatedUtc = rec.CreatedUtc, // Keep for backward compatibility
+        CreatedDateTimeOffset = createdOffset, // Timezone-aware version
+        BookerName = rec.BookerName,
+        PassengerName = rec.PassengerName,
+        VehicleClass = rec.VehicleClass,
+        PickupLocation = rec.PickupLocation,
+        DropoffLocation = rec.DropoffLocation,
+        PickupDateTime = rec.PickupDateTime, // Keep for backward compatibility
+        PickupDateTimeOffset = pickupOffset, // Timezone-aware version
+        Draft = rec.Draft,
         AssignedDriverId = rec.AssignedDriverId,
         AssignedDriverUid = rec.AssignedDriverUid,
-        AssignedDriverName = rec.AssignedDriverName ?? "Unassigned"
-    });
+        AssignedDriverName = rec.AssignedDriverName ?? "Unassigned",
+        
+        // Phase 2: Billing fields (currently null - will be populated in Phase 3+)
+        PaymentMethodId = null,      // TODO: Populate when Stripe/payment integration added
+        PaymentMethodLast4 = null,   // TODO: Populate when Stripe/payment integration added
+        PaymentAmount = null,        // TODO: Populate when pricing calculated
+        TotalAmount = null,          // TODO: Populate when final amount calculated
+        TotalFare = null             // TODO: Populate when final fare calculated
+    };
+    
+    // Phase 2: Mask billing fields for dispatchers
+    MaskBillingFields(user, response);
+
+    return Results.Ok(response);
 })
 .WithName("GetBooking")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly"); // Phase 2: Changed from generic auth to StaffOnly
 
 // ===================================================================
 // CANCEL ENDPOINTS
@@ -765,33 +1128,81 @@ app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepo
 // POST /bookings/{id}/cancel - Cancel a booking request
 app.MapPost("/bookings/{id}/cancel", async (
     string id,
+    HttpContext context,
     IBookingRepository repo,
     IEmailSender email,
+    AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
 {
     var log = loggerFactory.CreateLogger("bookings");
+    var user = context.User;
+    var currentUserId = GetUserId(user);
 
     // Find booking
     var booking = await repo.GetAsync(id);
     if (booking is null)
         return Results.NotFound(new { error = "Booking not found" });
 
+    // Phase 1: Verify user has permission to cancel this booking
+    // - Staff (admin/dispatcher): Can cancel any booking
+    // - Bookers: Can only cancel their own bookings
+    // - Drivers: Cannot cancel bookings (they use status updates instead)
+    if (!CanAccessRecord(user, booking.CreatedByUserId))
+    {
+        log.LogWarning("User {UserId} attempted to cancel booking {BookingId} they don't own", 
+            currentUserId, id);
+
+        // Phase 3: Audit forbidden cancellation attempt
+        await auditLogger.LogForbiddenAsync(
+            user,
+            AuditActions.BookingCancelled,
+            "Booking",
+            id,
+            httpContext: context);
+
+        return Results.Problem(
+            statusCode: 403,
+            title: "Forbidden",
+            detail: "You do not have permission to cancel this booking");
+    }
+
     // Only allow cancellation if status is Requested or Confirmed
     if (booking.Status != BookingStatus.Requested && booking.Status != BookingStatus.Confirmed)
     {
+        // Phase 3: Audit failed cancellation (invalid status)
+        await auditLogger.LogFailureAsync(
+            user,
+            AuditActions.BookingCancelled,
+            "Booking",
+            id,
+            errorMessage: $"Cannot cancel booking with status: {booking.Status}",
+            httpContext: context);
+
         return Results.BadRequest(new { error = $"Cannot cancel booking with status: {booking.Status}" });
     }
 
-    // Update status
-    booking.Status = BookingStatus.Cancelled;
-    booking.CancelledAt = DateTime.UtcNow;
-    await repo.UpdateStatusAsync(id, BookingStatus.Cancelled);
+    // Phase 1: Update status with audit trail (who cancelled and when)
+    await repo.UpdateStatusAsync(id, BookingStatus.Cancelled, currentUserId);
+
+    // Phase 3: Audit successful cancellation
+    await auditLogger.LogSuccessAsync(
+        user,
+        AuditActions.BookingCancelled,
+        "Booking",
+        id,
+        details: new {
+            previousStatus = booking.Status.ToString(),
+            passengerName = booking.PassengerName,
+            cancelledBy = currentUserId
+        },
+        httpContext: context);
 
     // Send cancellation email
     try
     {
         await email.SendBookingCancellationAsync(booking.Draft, id, booking.BookerName);
-        log.LogInformation("Booking {Id} cancelled by {Booker}", id, booking.BookerName);
+        log.LogInformation("Booking {Id} cancelled by user {UserId} (booker: {Booker})", 
+            id, currentUserId, booking.BookerName);
     }
     catch (Exception ex)
     {
@@ -857,6 +1268,16 @@ static TimeZoneInfo GetCentralTimeZone()
             return TimeZoneInfo.Local;
         }
     }
+}
+
+// Helper: Mask client secret for display (Phase 3: OAuth security)
+static string MaskSecret(string secret)
+{
+    if (string.IsNullOrWhiteSpace(secret)) return "********";
+    if (secret.Length <= 8) return "********";
+    
+    // Show first 4 and last 4 characters, mask the middle
+    return $"{secret[..4]}...{secret[^4..]}";
 }
 
 // GET /driver/rides/today - Get driver's rides for the next 24 hours
@@ -990,6 +1411,7 @@ app.MapPost("/driver/rides/{id}/status", async (
     IBookingRepository repo,
     ILocationService locationService,
     IHubContext<LocationHub> hubContext,
+    AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
 {
     // Finite state machine for ride status transitions
@@ -1022,6 +1444,20 @@ app.MapPost("/driver/rides/{id}/status", async (
     if (!allowedTransitions.ContainsKey(currentStatus) ||
         !allowedTransitions[currentStatus].Contains(request.NewStatus))
     {
+        // Phase 3: Audit failed status update (invalid transition)
+        await auditLogger.LogFailureAsync(
+            context.User,
+            AuditActions.BookingUpdated,
+            "Booking",
+            id,
+            errorMessage: $"Invalid status transition from {currentStatus} to {request.NewStatus}",
+            details: new { 
+                currentStatus = currentStatus.ToString(),
+                requestedStatus = request.NewStatus.ToString(),
+                driverUid
+            },
+            httpContext: context);
+
         return Results.BadRequest(new
         {
             error = $"Invalid status transition from {currentStatus} to {request.NewStatus}"
@@ -1042,6 +1478,21 @@ app.MapPost("/driver/rides/{id}/status", async (
 
     // FIX: Use new method that persists BOTH CurrentRideStatus and Status
     await repo.UpdateRideStatusAsync(id, request.NewStatus, newBookingStatus);
+
+    // Phase 3: Audit successful status update
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.BookingUpdated,
+        "Booking",
+        id,
+        details: new {
+            previousRideStatus = currentStatus.ToString(),
+            newRideStatus = request.NewStatus.ToString(),
+            newBookingStatus = newBookingStatus.ToString(),
+            driverUid,
+            passengerName = booking.PassengerName
+        },
+        httpContext: context);
 
     // Broadcast status change to AdminPortal and passengers via SignalR
     await hubContext.BroadcastRideStatusChangedAsync(
@@ -1303,7 +1754,7 @@ app.MapGet("/admin/locations", async (
     });
 })
 .WithName("GetAllActiveLocations")
-.RequireAuthorization(); // TODO: Add admin-only policy when ready
+.RequireAuthorization("StaffOnly"); // Phase 2: Both admin and dispatcher can view locations
 
 // GET /admin/locations/rides - Get locations for specific ride IDs (batch query)
 app.MapGet("/admin/locations/rides", async (
@@ -1350,7 +1801,7 @@ app.MapGet("/admin/locations/rides", async (
     });
 })
 .WithName("GetRideLocations")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly"); // Phase 2: Both admin and dispatcher can query locations
 
 // ===================================================================
 // AFFILIATE & DRIVER MANAGEMENT ENDPOINTS
@@ -1375,7 +1826,9 @@ app.MapGet("/affiliates/list", async (IAffiliateRepository affiliateRepo, IDrive
 // POST /affiliates - Create a new affiliate
 app.MapPost("/affiliates", async (
     [FromBody] Affiliate affiliate,
-    IAffiliateRepository repo) =>
+    HttpContext context,
+    IAffiliateRepository repo,
+    AuditLogger auditLogger) =>
 {
     if (string.IsNullOrWhiteSpace(affiliate.Name) || string.IsNullOrWhiteSpace(affiliate.Email))
         return Results.BadRequest(new { error = "Name and Email are required" });
@@ -1384,6 +1837,20 @@ app.MapPost("/affiliates", async (
     affiliate.Drivers = new List<Driver>(); // Initialize empty drivers list
 
     await repo.AddAsync(affiliate);
+
+    // Phase 3: Audit affiliate creation
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.AffiliateCreated,
+        "Affiliate",
+        affiliate.Id,
+        details: new {
+            name = affiliate.Name,
+            email = affiliate.Email,
+            city = affiliate.City
+        },
+        httpContext: context);
+
     return Results.Created($"/affiliates/{affiliate.Id}", affiliate);
 })
 .WithName("CreateAffiliate")
@@ -1407,7 +1874,9 @@ app.MapGet("/affiliates/{id}", async (string id, IAffiliateRepository affiliateR
 app.MapPut("/affiliates/{id}", async (
     string id,
     [FromBody] Affiliate affiliate,
-    IAffiliateRepository repo) =>
+    HttpContext context,
+    IAffiliateRepository repo,
+    AuditLogger auditLogger) =>
 {
     var existing = await repo.GetByIdAsync(id);
     if (existing is null)
@@ -1415,6 +1884,20 @@ app.MapPut("/affiliates/{id}", async (
 
     affiliate.Id = id; // Ensure ID matches
     await repo.UpdateAsync(affiliate);
+
+    // Phase 3: Audit affiliate update
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.AffiliateUpdated,
+        "Affiliate",
+        id,
+        details: new {
+            name = affiliate.Name,
+            email = affiliate.Email,
+            city = affiliate.City
+        },
+        httpContext: context);
+
     return Results.Ok(affiliate);
 })
 .WithName("UpdateAffiliate")
@@ -1423,17 +1906,36 @@ app.MapPut("/affiliates/{id}", async (
 // DELETE /affiliates/{id} - Delete affiliate (cascade delete drivers)
 app.MapDelete("/affiliates/{id}", async (
     string id,
+    HttpContext context,
     IAffiliateRepository affiliateRepo,
-    IDriverRepository driverRepo) =>
+    IDriverRepository driverRepo,
+    AuditLogger auditLogger) =>
 {
     var existing = await affiliateRepo.GetByIdAsync(id);
     if (existing is null)
         return Results.NotFound();
 
+    // Get driver count before deletion for audit
+    var drivers = await driverRepo.GetByAffiliateIdAsync(id);
+
     // Cascade delete all drivers belonging to this affiliate
     await driverRepo.DeleteByAffiliateIdAsync(id);
     
     await affiliateRepo.DeleteAsync(id);
+
+    // Phase 3: Audit driver deletion
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.AffiliateDeleted,
+        "Affiliate",
+        id,
+        details: new {
+            name = existing.Name,
+            email = existing.Email,
+            cascadeDeletedDrivers = drivers.Count
+        },
+        httpContext: context);
+
     return Results.Ok(new { message = "Affiliate and associated drivers deleted", id });
 })
 .WithName("DeleteAffiliate")
@@ -1443,8 +1945,10 @@ app.MapDelete("/affiliates/{id}", async (
 app.MapPost("/affiliates/{affiliateId}/drivers", async (
     string affiliateId,
     [FromBody] Driver driver,
+    HttpContext context,
     IAffiliateRepository affiliateRepo,
-    IDriverRepository driverRepo) =>
+    IDriverRepository driverRepo,
+    AuditLogger auditLogger) =>
 {
     var affiliate = await affiliateRepo.GetByIdAsync(affiliateId);
     if (affiliate is null)
@@ -1458,13 +1962,44 @@ app.MapPost("/affiliates/{affiliateId}/drivers", async (
     {
         var isUnique = await driverRepo.IsUserUidUniqueAsync(driver.UserUid);
         if (!isUnique)
+        {
+            // Phase 3: Audit failed driver creation (duplicate UserUid)
+            await auditLogger.LogAsync(
+                context.User,
+                AuditActions.DriverCreated,
+                "Driver",
+                details: new { 
+                    driverName = driver.Name,
+                    userUid = driver.UserUid,
+                    affiliateId
+                },
+                httpContext: context,
+                result: AuditLogResult.ValidationError,
+                errorMessage: $"UserUid '{driver.UserUid}' already assigned to another driver");
+
             return Results.BadRequest(new { error = $"UserUid '{driver.UserUid}' is already assigned to another driver" });
+        }
     }
 
     driver.Id = Guid.NewGuid().ToString("N");
     driver.AffiliateId = affiliateId;
 
     await driverRepo.AddAsync(driver);
+
+    // Phase 3: Audit driver creation
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.DriverCreated,
+        "Driver",
+        driver.Id,
+        details: new {
+            name = driver.Name,
+            userUid = driver.UserUid,
+            affiliateId,
+            affiliateName = affiliate.Name
+        },
+        httpContext: context);
+
     return Results.Created($"/drivers/{driver.Id}", driver);
 })
 .WithName("CreateDriver")
@@ -1501,7 +2036,9 @@ app.MapGet("/drivers/{id}", async (string id, IDriverRepository repo) =>
 app.MapPut("/drivers/{id}", async (
     string id,
     [FromBody] Driver driver,
-    IDriverRepository repo) =>
+    HttpContext context,
+    IDriverRepository repo,
+    AuditLogger auditLogger) =>
 {
     var existing = await repo.GetByIdAsync(id);
     if (existing is null)
@@ -1512,12 +2049,42 @@ app.MapPut("/drivers/{id}", async (
     {
         var isUnique = await repo.IsUserUidUniqueAsync(driver.UserUid, excludeDriverId: id);
         if (!isUnique)
+        {
+            // Phase 3: Audit failed driver update (duplicate UserUid)
+            await auditLogger.LogAsync(
+                context.User,
+                AuditActions.DriverUpdated,
+                "Driver",
+                id,
+                details: new { 
+                    driverName = driver.Name,
+                    userUid = driver.UserUid
+                },
+                httpContext: context,
+                result: AuditLogResult.ValidationError,
+                errorMessage: $"UserUid '{driver.UserUid}' already assigned to another driver");
+
             return Results.BadRequest(new { error = $"UserUid '{driver.UserUid}' is already assigned to another driver" });
+        }
     }
 
     driver.Id = id;
     driver.AffiliateId = existing.AffiliateId; // Preserve affiliate association
     await repo.UpdateAsync(driver);
+
+    // Phase 3: Audit driver update
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.DriverUpdated,
+        "Driver",
+        id,
+        details: new {
+            name = driver.Name,
+            userUid = driver.UserUid,
+            previousUserUid = existing.UserUid
+        },
+        httpContext: context);
+
     return Results.Ok(driver);
 })
 .WithName("UpdateDriver")
@@ -1526,13 +2093,29 @@ app.MapPut("/drivers/{id}", async (
 // DELETE /drivers/{id} - Delete driver
 app.MapDelete("/drivers/{id}", async (
     string id,
-    IDriverRepository repo) =>
+    HttpContext context,
+    IDriverRepository repo,
+    AuditLogger auditLogger) =>
 {
     var existing = await repo.GetByIdAsync(id);
     if (existing is null)
         return Results.NotFound();
 
     await repo.DeleteAsync(id);
+
+    // Phase 3: Audit driver deletion
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.DriverDeleted,
+        "Driver",
+        id,
+        details: new {
+            name = existing.Name,
+            userUid = existing.UserUid,
+            affiliateId = existing.AffiliateId
+        },
+        httpContext: context);
+
     return Results.Ok(new { message = "Driver deleted", id });
 })
 .WithName("DeleteDriver")
@@ -1542,10 +2125,12 @@ app.MapDelete("/drivers/{id}", async (
 app.MapPost("/bookings/{bookingId}/assign-driver", async (
     string bookingId,
     [FromBody] DriverAssignmentRequest request,
+    HttpContext context,
     IBookingRepository bookingRepo,
     IDriverRepository driverRepo,
     IAffiliateRepository affiliateRepo,
     IEmailSender email,
+    AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
 {
     var log = loggerFactory.CreateLogger("bookings");
@@ -1563,6 +2148,16 @@ app.MapPost("/bookings/{bookingId}/assign-driver", async (
     // CRITICAL: Validate driver has UserUid for driver app authentication
     if (string.IsNullOrWhiteSpace(driver.UserUid))
     {
+        // Phase 3: Audit failed assignment (missing UserUid)
+        await auditLogger.LogFailureAsync(
+            context.User,
+            AuditActions.DriverAssigned,
+            "Booking",
+            bookingId,
+            errorMessage: "Driver missing UserUid",
+            details: new { driverId = driver.Id, driverName = driver.Name },
+            httpContext: context);
+
         return Results.BadRequest(new 
         { 
             error = "Cannot assign driver without a UserUid. Please link the driver to an AuthServer user first.",
@@ -1582,6 +2177,23 @@ app.MapPost("/bookings/{bookingId}/assign-driver", async (
         driver.Id,
         driver.UserUid,
         driver.Name);
+
+    // Phase 3: Audit successful driver assignment
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.DriverAssigned,
+        "Booking",
+        bookingId,
+        details: new {
+            driverId = driver.Id,
+            driverName = driver.Name,
+            driverUid = driver.UserUid,
+            affiliateId = affiliate.Id,
+            affiliateName = affiliate.Name,
+            passengerName = booking.PassengerName,
+            pickupDateTime = booking.PickupDateTime
+        },
+        httpContext: context);
 
     // Send email notification to affiliate
     try
@@ -1609,12 +2221,14 @@ app.MapPost("/bookings/{bookingId}/assign-driver", async (
     });
 })
 .WithName("AssignDriver")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly"); // Phase 2: Changed from generic auth to StaffOnly (both admin and dispatcher can assign)
 
 // POST /dev/seed-affiliates - Seed test affiliates and drivers (DEV ONLY)
 app.MapPost("/dev/seed-affiliates", async (
+    HttpContext context,
     IAffiliateRepository affiliateRepo,
-    IDriverRepository driverRepo) =>
+    IDriverRepository driverRepo,
+    AuditLogger auditLogger) =>
 {
     // Define affiliates (without embedded drivers - they're stored separately)
     var affiliates = new[]
@@ -1681,6 +2295,18 @@ app.MapPost("/dev/seed-affiliates", async (
     foreach (var driver in drivers)
         await driverRepo.AddAsync(driver);
 
+    // Phase 3: Audit seed action
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.AffiliateCreated,
+        "Affiliate",
+        details: new { 
+            affiliatesCount = affiliates.Length,
+            driversCount = drivers.Length,
+            action = "bulk_seed"
+        },
+        httpContext: context);
+
     return Results.Ok(new 
     { 
         affiliatesAdded = affiliates.Length, 
@@ -1689,10 +2315,372 @@ app.MapPost("/dev/seed-affiliates", async (
         note = "Driver 'Charlie Johnson' has UserUid 'driver-001' matching AuthServer test user 'charlie'"
     });
 })
-.WithName("SeedAffiliates");
+.WithName("SeedAffiliates")
+.RequireAuthorization("AdminOnly"); // Phase 2: Only admins can seed data (security best practice)
 
 // ===================================================================
-// APPLICATION START
+// PHASE 2: OAUTH CREDENTIAL MANAGEMENT ENDPOINTS
 // ===================================================================
+
+// GET /api/admin/oauth - Get current OAuth credentials (secret masked)
+app.MapGet("/api/admin/oauth", async (
+    OAuthCredentialService oauthService,
+    AuditLogger auditLogger,
+    HttpContext context) =>
+{
+    var credentials = await oauthService.GetCredentialsAsync();
+    
+    // Phase 3: Audit credential view (sensitive operation)
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.OAuthCredentialsViewed,
+        "OAuth",
+        "default",
+        httpContext: context);
+
+    if (credentials == null)
+    {
+        return Results.Ok(new
+        {
+            configured = false,
+            message = "OAuth credentials not configured. Use PUT /api/admin/oauth to set them."
+        });
+    }
+
+    // Return masked response (never expose full secret)
+    var response = new OAuthCredentialsResponseDto
+    {
+        ClientId = credentials.ClientId,
+        ClientSecretMasked = MaskSecret(credentials.ClientSecret),
+        LastUpdatedUtc = credentials.LastUpdatedUtc,
+        LastUpdatedBy = credentials.LastUpdatedBy,
+        Description = credentials.Description
+    };
+
+    return Results.Ok(new
+    {
+        configured = true,
+        credentials = response
+    });
+})
+.WithName("GetOAuthCredentials")
+.RequireAuthorization("AdminOnly") // Phase 2: Only admins can view credentials
+.WithTags("Admin", "OAuth");
+
+
+// PUT /api/admin/oauth - Update OAuth credentials
+app.MapPut("/api/admin/oauth", async (
+    [FromBody] UpdateOAuthCredentialsRequest request,
+    HttpContext context,
+    OAuthCredentialService oauthService,
+    AuditLogger auditLogger,
+    ILoggerFactory loggerFactory) =>
+{
+    var log = loggerFactory.CreateLogger("oauth");
+    
+    // Validate request
+    if (string.IsNullOrWhiteSpace(request.ClientId) || 
+        string.IsNullOrWhiteSpace(request.ClientSecret))
+    {
+        // Phase 3: Audit failed update (validation error)
+        await auditLogger.LogAsync(
+            context.User,
+            AuditActions.OAuthCredentialsUpdated,
+            "OAuth",
+            "default",
+            httpContext: context,
+            result: AuditLogResult.ValidationError,
+            errorMessage: "ClientId and ClientSecret are required");
+
+        return Results.BadRequest(new 
+        { 
+            error = "Both ClientId and ClientSecret are required" 
+        });
+    }
+
+    // Get admin username for audit trail
+    var adminUsername = context.User.FindFirst("sub")?.Value ?? "unknown";
+
+    // Update credentials (encrypts before storage, invalidates cache)
+    var credentials = new OAuthClientCredentials
+    {
+        Id = "default",
+        ClientId = request.ClientId,
+        ClientSecret = request.ClientSecret,
+        Description = request.Description
+    };
+
+    await oauthService.UpdateCredentialsAsync(credentials, adminUsername);
+
+    // Phase 3: Audit successful credential update (CRITICAL - never log actual secret!)
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.OAuthCredentialsUpdated,
+        "OAuth",
+        "default",
+        details: new {
+            clientId = credentials.ClientId,
+            clientSecretMasked = MaskSecret(credentials.ClientSecret),
+            description = request.Description,
+            updatedBy = adminUsername
+        },
+        httpContext: context);
+
+    log.LogInformation("OAuth credentials updated by admin {AdminUsername}", adminUsername);
+
+    // Return success with masked secret
+    return Results.Ok(new
+    {
+        message = "OAuth credentials updated successfully",
+        clientId = credentials.ClientId,
+        clientSecretMasked = MaskSecret(credentials.ClientSecret),
+        updatedBy = adminUsername,
+        updatedAt = DateTime.UtcNow,
+        note = "Cache invalidated. New credentials will be used for all future API calls."
+    });
+})
+.WithName("UpdateOAuthCredentials")
+.RequireAuthorization("AdminOnly") // Phase 2: Only admins can update credentials
+.WithTags("Admin", "OAuth");
+
+
+// ===================================================================
+// PHASE 3: AUDIT LOG ENDPOINTS (Admin-Only)
+// ===================================================================
+
+// GET /api/admin/audit-logs - Query audit logs with filtering and pagination
+app.MapGet("/api/admin/audit-logs", async (
+    HttpContext context,
+    [FromQuery] string? userId,
+    [FromQuery] string? entityType,
+    [FromQuery] string? action,
+    [FromQuery] DateTime? startDate,
+    [FromQuery] DateTime? endDate,
+    [FromQuery] int take,
+    [FromQuery] int skip,
+    IAuditLogRepository auditRepo) =>
+{
+    // Validate and default pagination
+    if (take <= 0 || take > 1000) take = 100;
+    if (skip < 0) skip = 0;
+
+    var logs = await auditRepo.GetLogsAsync(
+        userId: userId,
+        entityType: entityType,
+        action: action,
+        startDate: startDate,
+        endDate: endDate,
+        take: take,
+        skip: skip);
+
+    var totalCount = await auditRepo.GetCountAsync(
+        userId: userId,
+        entityType: entityType,
+        action: action,
+        startDate: startDate,
+        endDate: endDate);
+
+    return Results.Ok(new
+    {
+        logs,
+        pagination = new
+        {
+            total = totalCount,
+            skip,
+            take,
+            returned = logs.Count
+        },
+        filters = new
+        {
+            userId,
+            entityType,
+            action,
+            startDate,
+            endDate
+        }
+    });
+})
+.WithName("GetAuditLogs")
+.RequireAuthorization("AdminOnly") // Phase 3: Only admins can view audit logs
+.WithTags("Admin", "Audit");
+
+
+// GET /api/admin/audit-logs/{id} - Get specific audit log by ID
+app.MapGet("/api/admin/audit-logs/{id}", async (
+    string id,
+    IAuditLogRepository auditRepo) =>
+{
+    var log = await auditRepo.GetByIdAsync(id);
+    
+    if (log is null)
+        return Results.NotFound(new { error = "Audit log not found" });
+
+    return Results.Ok(log);
+})
+.WithName("GetAuditLogById")
+.RequireAuthorization("AdminOnly")
+.WithTags("Admin", "Audit");
+
+// DELETE /api/admin/audit-logs/cleanup - Clean up old audit logs
+app.MapDelete("/api/admin/audit-logs/cleanup", async (
+    [FromQuery] int retentionDays,
+    HttpContext context,
+    IAuditLogRepository auditRepo,
+    AuditLogger auditLogger) =>
+{
+    // Default retention: 90 days
+    if (retentionDays <= 0 || retentionDays > 365) retentionDays = 90;
+
+    var deletedCount = await auditRepo.DeleteOldLogsAsync(retentionDays);
+
+    // Log the cleanup action
+    await auditLogger.LogSystemActionAsync(
+        AuditActions.DataRetentionCleanup,
+        "AuditLog",
+        details: new { retentionDays, deletedCount });
+
+    return Results.Ok(new
+    {
+        message = "Audit log cleanup completed",
+        deletedCount,
+        retentionDays,
+        cutoffDate = DateTime.UtcNow.AddDays(-retentionDays)
+    });
+})
+.WithName("CleanupAuditLogs")
+.RequireAuthorization("AdminOnly")
+.WithTags("Admin", "Audit");
+
+// ===================================================================
+// PHASE 3C: DATA RETENTION ENDPOINTS (Admin-Only)
+// ===================================================================
+
+// GET /api/admin/data-retention/policy - Get data retention policy
+app.MapGet("/api/admin/data-retention/policy", (
+    IDataRetentionService retentionService) =>
+{
+    var policy = retentionService.GetRetentionPolicy();
+
+    return Results.Ok(new
+    {
+        policy,
+        description = "Data retention policy for GDPR compliance",
+        note = "Automated cleanup runs daily at 2 AM UTC"
+    });
+})
+.WithName("GetDataRetentionPolicy")
+.RequireAuthorization("AdminOnly")
+.WithTags("Admin", "DataRetention");
+
+// POST /api/admin/data-retention/cleanup - Manual data retention cleanup
+app.MapPost("/api/admin/data-retention/cleanup", async (
+    HttpContext context,
+    IDataRetentionService retentionService,
+    AuditLogger auditLogger) =>
+{
+    var startTime = DateTime.UtcNow;
+
+    // Run all cleanup tasks
+    var auditLogsDeleted = await retentionService.CleanupOldAuditLogsAsync();
+    var bookingsAnonymized = await retentionService.AnonymizeOldBookingsAsync();
+    var quotesDeleted = await retentionService.DeleteOldQuotesAsync();
+
+    var duration = DateTime.UtcNow - startTime;
+
+    // Audit log manual cleanup
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        "DataRetention.ManualCleanup",
+        "System",
+        details: new
+        {
+            auditLogsDeleted,
+            bookingsAnonymized,
+            quotesDeleted,
+            durationSeconds = duration.TotalSeconds
+        },
+        httpContext: context);
+
+    return Results.Ok(new
+    {
+        message = "Data retention cleanup completed successfully",
+        auditLogsDeleted,
+        bookingsAnonymized,
+        quotesDeleted,
+        durationSeconds = duration.TotalSeconds,
+        policy = retentionService.GetRetentionPolicy()
+    });
+})
+.WithName("ManualDataRetentionCleanup")
+.RequireAuthorization("AdminOnly")
+.WithTags("Admin", "DataRetention");
+
+
+// POST /api/admin/data-protection/test - Test data encryption/decryption
+app.MapPost("/api/admin/data-protection/test", (
+    ISensitiveDataProtector dataProtector) =>
+{
+    var testData = "Sensitive test data 12345";
+
+    try
+    {
+        // Test encryption
+        var encrypted = dataProtector.Protect(testData);
+        var isProtected = dataProtector.IsProtected(encrypted);
+
+        // Test decryption
+        var decrypted = dataProtector.Unprotect(encrypted);
+
+        var success = decrypted == testData;
+
+        return Results.Ok(new
+        {
+            success,
+            message = success ? "Data protection is working correctly" : "Data protection test failed",
+            test = new
+            {
+                original = testData,
+                encrypted = encrypted.Substring(0, Math.Min(50, encrypted.Length)) + "...",
+                decrypted,
+                isProtected,
+                encryptedLength = encrypted.Length
+            }
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(
+            statusCode: 500,
+            title: "Data protection test failed",
+            detail: ex.Message);
+    }
+})
+.WithName("TestDataProtection")
+.RequireAuthorization("AdminOnly")
+.WithTags("Admin", "DataProtection");
+
+// ===================================================================
+// START APPLICATION
+// ===================================================================
+
+Console.WriteLine("? Bellwood AdminAPI starting...");
+Console.WriteLine($"   Environment: {app.Environment.EnvironmentName}");
+Console.WriteLine($"   Listening on: https://localhost:5206");
 
 app.Run();
+
+Console.WriteLine("? Bellwood AdminAPI stopped.");
+
+// ===================================================================
+// DTOs
+// ===================================================================
+
+// Role assignment request DTO
+public record RoleAssignmentRequest(string Role);
+
+// Role assignment response DTO (from AuthServer)
+public record RoleAssignmentResponse(
+    string Message,
+    string Username,
+    IEnumerable<string> PreviousRoles,
+    string NewRole);

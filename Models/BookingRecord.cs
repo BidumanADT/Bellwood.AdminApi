@@ -38,6 +38,29 @@ public sealed class BookingRecord
     public BookingStatus Status { get; set; } = BookingStatus.Requested;
     public DateTime? CancelledAt { get; set; }
 
+    // =====================================================================
+    // OWNERSHIP & AUDIT FIELDS (Phase 1 - User Data Access Enforcement)
+    // =====================================================================
+    
+    /// <summary>
+    /// The user ID (uid claim from JWT) of the user who created this booking.
+    /// Nullable for backward compatibility with existing records.
+    /// Used to enforce per-user data isolation for bookers/passengers.
+    /// </summary>
+    public string? CreatedByUserId { get; set; }
+    
+    /// <summary>
+    /// The user ID of the last user who modified this booking.
+    /// Populated on updates for audit trail purposes.
+    /// </summary>
+    public string? ModifiedByUserId { get; set; }
+    
+    /// <summary>
+    /// Timestamp of the last modification to this booking.
+    /// Populated on updates for audit trail purposes.
+    /// </summary>
+    public DateTime? ModifiedOnUtc { get; set; }
+
     // Driver assignment (both IDs for different purposes)
     public string? AssignedDriverId { get; set; }      // Links to Driver entity
     public string? AssignedDriverUid { get; set; }     // Links to AuthServer UID for driver app
@@ -54,4 +77,57 @@ public sealed class BookingRecord
 
     // Full payload for detail view
     public BellwoodGlobal.Mobile.Models.QuoteDraft Draft { get; set; } = new();
+
+    // =====================================================================
+    // PAYMENT & BILLING FIELDS (Phase 3C - Sensitive Data Protection)
+    // =====================================================================
+    
+    /// <summary>
+    /// Stripe payment method ID (encrypted).
+    /// Example: "pm_1234567890abcdef" (encrypted with Data Protection API)
+    /// Phase 3+: Populated when payment is processed.
+    /// </summary>
+    public string? PaymentMethodIdEncrypted { get; set; }
+    
+    /// <summary>
+    /// Last 4 digits of payment method (unencrypted for display).
+    /// Example: "4242" for Visa ending in 4242
+    /// Phase 3+: Populated when payment is processed.
+    /// </summary>
+    public string? PaymentMethodLast4 { get; set; }
+    
+    /// <summary>
+    /// Payment method type (unencrypted).
+    /// Example: "card", "bank_account"
+    /// Phase 3+: Populated when payment is processed.
+    /// </summary>
+    public string? PaymentMethodType { get; set; }
+    
+    /// <summary>
+    /// Total amount charged in cents (unencrypted).
+    /// Example: 12500 = $125.00
+    /// Phase 3+: Populated when payment is processed.
+    /// </summary>
+    public int? TotalAmountCents { get; set; }
+    
+    /// <summary>
+    /// Total fare/price in cents (unencrypted).
+    /// Example: 10000 = $100.00 (before fees/taxes)
+    /// Phase 3+: Populated when pricing is calculated.
+    /// </summary>
+    public int? TotalFareCents { get; set; }
+    
+    /// <summary>
+    /// Currency code (ISO 4217).
+    /// Example: "USD", "CAD", "EUR"
+    /// Phase 3+: Populated when payment is processed.
+    /// </summary>
+    public string? CurrencyCode { get; set; }
+    
+    /// <summary>
+    /// Billing notes (encrypted if contains sensitive info).
+    /// Example: Invoice number, special billing instructions
+    /// Phase 3+: Optional field for internal use.
+    /// </summary>
+    public string? BillingNotesEncrypted { get; set; }
 }
