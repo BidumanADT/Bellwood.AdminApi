@@ -61,6 +61,17 @@ public sealed class BookingRecord
     /// </summary>
     public DateTime? ModifiedOnUtc { get; set; }
 
+    // =====================================================================
+    // PHASE ALPHA: QUOTE-TO-BOOKING LINK
+    // =====================================================================
+    
+    /// <summary>
+    /// ID of the quote that originated this booking.
+    /// Populated when passenger accepts a quote (POST /quotes/{id}/accept).
+    /// Null for direct bookings (not created from quotes).
+    /// </summary>
+    public string? SourceQuoteId { get; set; }
+
     // Driver assignment (both IDs for different purposes)
     public string? AssignedDriverId { get; set; }      // Links to Driver entity
     public string? AssignedDriverUid { get; set; }     // Links to AuthServer UID for driver app

@@ -1,6 +1,19 @@
 ﻿namespace Bellwood.AdminApi.Models;
 
-public enum QuoteStatus { Submitted, InReview, Priced, Sent, Closed, Rejected }
+// Phase Alpha: Extended quote lifecycle status
+public enum QuoteStatus 
+{ 
+    Submitted,      // Initial passenger request
+    InReview,       // Legacy status (deprecated - use Acknowledged)
+    Acknowledged,   // Dispatcher acknowledged receipt (Phase Alpha)
+    Priced,         // Legacy status (deprecated - use Responded)
+    Sent,           // Legacy status (deprecated - use Responded)
+    Responded,      // Dispatcher provided price/ETA (Phase Alpha)
+    Accepted,       // Passenger accepted quote (Phase Alpha)
+    Closed,         // Legacy status (deprecated)
+    Cancelled,      // Quote cancelled (Phase Alpha)
+    Rejected        // Admin rejected quote
+}
 
 public sealed class QuoteRecord
 {
@@ -30,6 +43,52 @@ public sealed class QuoteRecord
     /// Populated on updates for audit trail purposes.
     /// </summary>
     public DateTime? ModifiedOnUtc { get; set; }
+
+    // =====================================================================
+    // PHASE ALPHA: QUOTE LIFECYCLE TRACKING FIELDS
+    // =====================================================================
+    
+    /// <summary>
+    /// Timestamp when dispatcher acknowledged receipt of quote.
+    /// Populated when status changes to Acknowledged.
+    /// </summary>
+    public DateTime? AcknowledgedAt { get; set; }
+    
+    /// <summary>
+    /// User ID of dispatcher who acknowledged the quote.
+    /// Links to AuthServer user identity.
+    /// </summary>
+    public string? AcknowledgedByUserId { get; set; }
+    
+    /// <summary>
+    /// Timestamp when dispatcher sent price/ETA response.
+    /// Populated when status changes to Responded.
+    /// </summary>
+    public DateTime? RespondedAt { get; set; }
+    
+    /// <summary>
+    /// User ID of dispatcher who sent the response.
+    /// Links to AuthServer user identity.
+    /// </summary>
+    public string? RespondedByUserId { get; set; }
+    
+    /// <summary>
+    /// Estimated price provided by dispatcher (manual entry for alpha test).
+    /// Placeholder until LimoAnywhere integration in Phase 3.
+    /// </summary>
+    public decimal? EstimatedPrice { get; set; }
+    
+    /// <summary>
+    /// Estimated pickup time provided by dispatcher.
+    /// May differ from requested pickup time.
+    /// </summary>
+    public DateTime? EstimatedPickupTime { get; set; }
+    
+    /// <summary>
+    /// Optional notes from dispatcher to passenger.
+    /// E.g., "Traffic delay expected", "VIP service confirmed", etc.
+    /// </summary>
+    public string? Notes { get; set; }
 
     // minimal fields for list
     public string BookerName { get; set; } = "";
