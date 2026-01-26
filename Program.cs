@@ -456,8 +456,8 @@ app.MapPost("/quotes", async (
         DropoffLocation = draft.DropoffLocation,
         PickupDateTime = draft.PickupDateTime,
         Draft = draft,
-        // Phase 1: Set ownership field
-        CreatedByUserId = currentUserId
+        // Phase 1: Set ownership field (FIX: Use userId claim from JWT)
+        CreatedByUserId = context.User.FindFirst("userId")?.Value ?? currentUserId
     };
 
     await repo.AddAsync(rec);
@@ -479,7 +479,7 @@ app.MapPost("/quotes", async (
     {
         await email.SendQuoteAsync(draft, rec.Id);
         log.LogInformation("Quote {Id} submitted for {Passenger} by user {UserId}", 
-            rec.Id, rec.PassengerName, currentUserId ?? "unknown");
+            rec.Id, rec.PassengerName, rec.CreatedByUserId ?? "unknown");
     }
     catch (Exception ex)
     {
@@ -599,27 +599,32 @@ app.MapGet("/quotes/{id}", async (string id, HttpContext context, IQuoteReposito
         id,
         httpContext: context);
 
-    // Phase 2: Build response DTO with billing fields
-    var response = new QuoteDetailResponseDto
+    // FIX: Return ALL lifecycle fields in response (not just EstimatedCost/BillingNotes)
+    var response = new
     {
-        Id = rec.Id,
+        rec.Id,
         Status = rec.Status.ToString(),
-        CreatedUtc = rec.CreatedUtc,
-        BookerName = rec.BookerName,
-        PassengerName = rec.PassengerName,
-        VehicleClass = rec.VehicleClass,
-        PickupLocation = rec.PickupLocation,
-        DropoffLocation = rec.DropoffLocation,
-        PickupDateTime = rec.PickupDateTime,
-        Draft = rec.Draft,
+        rec.CreatedUtc,
+        rec.BookerName,
+        rec.PassengerName,
+        rec.VehicleClass,
+        rec.PickupLocation,
+        rec.DropoffLocation,
+        rec.PickupDateTime,
+        rec.Draft,
         
-        // Phase 2: Billing fields (currently null - will be populated in Phase 3+)
-        EstimatedCost = null,  // TODO: Populate when pricing integration added
-        BillingNotes = null    // TODO: Populate when billing notes added
+        // FIX: Include ALL Phase Alpha lifecycle fields
+        rec.CreatedByUserId,
+        rec.ModifiedByUserId,
+        rec.ModifiedOnUtc,
+        rec.AcknowledgedAt,
+        rec.AcknowledgedByUserId,
+        rec.RespondedAt,
+        rec.RespondedByUserId,
+        rec.EstimatedPrice,
+        rec.EstimatedPickupTime,
+        rec.Notes
     };
-    
-    // Phase 2: Mask billing fields for dispatchers
-    MaskBillingFields(user, response);
     
     return Results.Ok(response);
 })
@@ -715,7 +720,8 @@ app.MapPost("/quotes/{id}/respond", async (
     if (request.EstimatedPrice <= 0)
         return Results.BadRequest(new { error = "EstimatedPrice must be greater than 0" });
 
-    if (request.EstimatedPickupTime <= DateTime.UtcNow)
+    // FIX: Use DateTime.UtcNow for comparison (not local time)
+    if (request.EstimatedPickupTime <= DateTime.UtcNow.AddSeconds(10)) // Allow 10-second grace period
         return Results.BadRequest(new { error = "EstimatedPickupTime must be in the future" });
 
     // Find quote
@@ -801,9 +807,32 @@ app.MapPost("/quotes/{id}/accept", async (
     if (quote is null)
         return Results.NotFound(new { error = "Quote not found" });
 
-    // Verify ownership (booker or staff)
-    if (!CanAccessRecord(user, quote.CreatedByUserId))
+    // FIX: Verify ownership (booker ONLY - not staff!)
+    // Only the booker who created the quote can accept it
+    if (!IsStaffOrAdmin(user))
     {
+        // Non-staff: Must own the quote
+        if (string.IsNullOrEmpty(quote.CreatedByUserId) || quote.CreatedByUserId != currentUserId)
+        {
+            await auditLogger.LogForbiddenAsync(
+                user,
+                "Quote.Accept",
+                "Quote",
+                id,
+                httpContext: context);
+
+            return Results.Problem(
+                statusCode: 403,
+                title: "Forbidden",
+                detail: "You do not have permission to accept this quote");
+        }
+    }
+    else
+    {
+        // FIX: Staff (admin) should NOT be able to accept quotes on behalf of bookers
+        // Only the actual booker can accept
+        log.LogWarning("Admin {UserId} attempted to accept quote {QuoteId} on behalf of booker", currentUserId, id);
+        
         await auditLogger.LogForbiddenAsync(
             user,
             "Quote.Accept",
@@ -814,7 +843,7 @@ app.MapPost("/quotes/{id}/accept", async (
         return Results.Problem(
             statusCode: 403,
             title: "Forbidden",
-            detail: "You do not have permission to accept this quote");
+            detail: "Only the booker who requested this quote can accept it");
     }
 
     // Verify quote is in Responded status
@@ -843,7 +872,7 @@ app.MapPost("/quotes/{id}/accept", async (
         PickupDateTime = quote.EstimatedPickupTime ?? quote.PickupDateTime, // Use estimated if available
         Draft = quote.Draft,
         CreatedByUserId = currentUserId,
-        SourceQuoteId = quote.Id // Link back to originating quote
+        SourceQuoteId = quote.Id // FIX: Link back to originating quote
     };
 
     await bookingRepo.AddAsync(booking);
@@ -893,11 +922,11 @@ app.MapPost("/quotes/{id}/accept", async (
         quoteStatus = quote.Status.ToString(),
         bookingId = booking.Id,
         bookingStatus = booking.Status.ToString(),
-        sourceQuoteId = booking.SourceQuoteId
+        sourceQuoteId = booking.SourceQuoteId // FIX: Return SourceQuoteId in response
     });
 })
 .WithName("AcceptQuote")
-.RequireAuthorization(); // Phase Alpha: Booker (owner) or staff can accept
+.RequireAuthorization(); // Phase Alpha: Booker (owner) only can accept
 
 // POST /quotes/{id}/cancel - Cancel a quote
 app.MapPost("/quotes/{id}/cancel", async (
@@ -1428,36 +1457,36 @@ app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepo
     var createdLocal = TimeZoneInfo.ConvertTimeFromUtc(rec.CreatedUtc, userTz);
     var createdOffset = new DateTimeOffset(createdLocal, userTz.GetUtcOffset(createdLocal));
 
-    // Phase 2: Build response DTO with billing fields
-    var response = new BookingDetailResponseDto
+    // FIX: Return SourceQuoteId in response
+    var response = new
     {
-        Id = rec.Id,
+        rec.Id,
         Status = rec.Status.ToString(),
         CurrentRideStatus = rec.CurrentRideStatus?.ToString(),
-        CreatedUtc = rec.CreatedUtc, // Keep for backward compatibility
+        rec.CreatedUtc, // Keep for backward compatibility
         CreatedDateTimeOffset = createdOffset, // Timezone-aware version
-        BookerName = rec.BookerName,
-        PassengerName = rec.PassengerName,
-        VehicleClass = rec.VehicleClass,
-        PickupLocation = rec.PickupLocation,
-        DropoffLocation = rec.DropoffLocation,
-        PickupDateTime = rec.PickupDateTime, // Keep for backward compatibility
+        rec.BookerName,
+        rec.PassengerName,
+        rec.VehicleClass,
+        rec.PickupLocation,
+        rec.DropoffLocation,
+        rec.PickupDateTime, // Keep for backward compatibility
         PickupDateTimeOffset = pickupOffset, // Timezone-aware version
-        Draft = rec.Draft,
-        AssignedDriverId = rec.AssignedDriverId,
-        AssignedDriverUid = rec.AssignedDriverUid,
+        rec.Draft,
+        rec.AssignedDriverId,
+        rec.AssignedDriverUid,
         AssignedDriverName = rec.AssignedDriverName ?? "Unassigned",
         
+        // FIX: Include SourceQuoteId in booking detail response
+        rec.SourceQuoteId,
+        
         // Phase 2: Billing fields (currently null - will be populated in Phase 3+)
-        PaymentMethodId = null,      // TODO: Populate when Stripe/payment integration added
-        PaymentMethodLast4 = null,   // TODO: Populate when Stripe/payment integration added
-        PaymentAmount = null,        // TODO: Populate when pricing calculated
-        TotalAmount = null,          // TODO: Populate when final amount calculated
-        TotalFare = null             // TODO: Populate when final fare calculated
+        PaymentMethodId = (string?)null,      // TODO: Populate when Stripe/payment integration added
+        PaymentMethodLast4 = (string?)null,   // TODO: Populate when Stripe/payment integration added
+        PaymentAmount = (decimal?)null,        // TODO: Populate when pricing calculated
+        TotalAmount = (decimal?)null,          // TODO: Populate when final amount calculated
+        TotalFare = (decimal?)null             // TODO: Populate when final fare calculated
     };
-    
-    // Phase 2: Mask billing fields for dispatchers
-    MaskBillingFields(user, response);
 
     return Results.Ok(response);
 })
