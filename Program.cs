@@ -720,8 +720,14 @@ app.MapPost("/quotes/{id}/respond", async (
     if (request.EstimatedPrice <= 0)
         return Results.BadRequest(new { error = "EstimatedPrice must be greater than 0" });
 
-    // FIX: Use DateTime.UtcNow for comparison (not local time)
-    if (request.EstimatedPickupTime <= DateTime.UtcNow.AddSeconds(10)) // Allow 10-second grace period
+    // FIX: Ensure both times are in UTC for fair comparison
+    // Handle both UTC and Unspecified DateTime.Kind
+    DateTime pickupTimeUtc = request.EstimatedPickupTime.Kind == DateTimeKind.Utc
+        ? request.EstimatedPickupTime
+        : DateTime.SpecifyKind(request.EstimatedPickupTime, DateTimeKind.Utc);
+    
+    // Allow 10-second grace period for clock skew
+    if (pickupTimeUtc <= DateTime.UtcNow.AddSeconds(10))
         return Results.BadRequest(new { error = "EstimatedPickupTime must be in the future" });
 
     // Find quote
@@ -1744,7 +1750,7 @@ app.MapGet("/driver/rides/{id}", async (string id, HttpContext context, IBooking
     }
     else
     {
-        // Local or Unspecified - treat as already in correct timezone
+        // Local or Unspecified - treat as already in userTz timezone
         // Must convert to Unspecified to avoid offset mismatch
         var unspecified = DateTime.SpecifyKind(booking.PickupDateTime, DateTimeKind.Unspecified);
         pickupOffset = new DateTimeOffset(unspecified, driverTz.GetUtcOffset(unspecified));
