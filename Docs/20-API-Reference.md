@@ -233,6 +233,199 @@ Authorization: Bearer {token}
 
 ---
 
+### POST /quotes/{id}/acknowledge
+
+**Description**: Dispatcher acknowledges receipt of quote (Phase Alpha)
+
+**Auth**: `StaffOnly` (dispatcher or admin)
+
+**Request**:
+```http
+POST /quotes/quote-abc123/acknowledge HTTP/1.1
+Host: localhost:5206
+Authorization: Bearer {dispatcherToken}
+```
+
+**Response** (200 OK):
+```json
+{
+  "message": "Quote acknowledged successfully",
+  "id": "quote-abc123",
+  "status": "Acknowledged",
+  "acknowledgedAt": "2026-01-27T14:30:00Z",
+  "acknowledgedBy": "diana-user-guid"
+}
+```
+
+**FSM Validation**:
+- Can only acknowledge quotes with status `Submitted`
+- Transition: `Submitted` ? `Acknowledged`
+
+**Side Effects**:
+- Quote status updated to `Acknowledged`
+- `AcknowledgedAt` and `AcknowledgedByUserId` populated
+- `ModifiedByUserId` and `ModifiedOnUtc` updated
+- Audit log created
+
+**Error Responses**:
+- **404 Not Found**: Quote doesn't exist
+- **400 Bad Request**: Quote status is not `Submitted`
+
+---
+
+### POST /quotes/{id}/respond
+
+**Description**: Dispatcher sends price/ETA response to passenger (Phase Alpha)
+
+**Auth**: `StaffOnly` (dispatcher or admin)
+
+**Request**:
+```http
+POST /quotes/quote-abc123/respond HTTP/1.1
+Host: localhost:5206
+Authorization: Bearer {dispatcherToken}
+Content-Type: application/json
+
+{
+  "estimatedPrice": 150.00,
+  "estimatedPickupTime": "2026-02-01T14:00:00",
+  "notes": "VIP service confirmed. Driver will meet you at arrivals."
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "message": "Quote response sent successfully",
+  "id": "quote-abc123",
+  "status": "Responded",
+  "respondedAt": "2026-01-27T14:35:00Z",
+  "respondedBy": "diana-user-guid",
+  "estimatedPrice": 150.00,
+  "estimatedPickupTime": "2026-02-01T14:00:00",
+  "notes": "VIP service confirmed. Driver will meet you at arrivals."
+}
+```
+
+**Validation**:
+- `estimatedPrice` must be > 0
+- `estimatedPickupTime` must be in the future (1-minute grace period for clock skew)
+- `notes` is optional
+
+**FSM Validation**:
+- Can only respond to quotes with status `Acknowledged`
+- Transition: `Acknowledged` ? `Responded`
+
+**Side Effects**:
+- Quote status updated to `Responded`
+- `RespondedAt`, `RespondedByUserId`, `EstimatedPrice`, `EstimatedPickupTime`, `Notes` populated
+- `ModifiedByUserId` and `ModifiedOnUtc` updated
+- **Email sent to passenger** with quote response details
+- Audit log created
+
+**Error Responses**:
+- **404 Not Found**: Quote doesn't exist
+- **400 Bad Request**: 
+  - Quote status is not `Acknowledged`
+  - `estimatedPrice` ? 0
+  - `estimatedPickupTime` is not in the future
+
+---
+
+### POST /quotes/{id}/accept
+
+**Description**: Passenger accepts quote and creates booking (Phase Alpha)
+
+**Auth**: Required (booker/owner only - staff cannot accept on behalf of passenger)
+
+**Request**:
+```http
+POST /quotes/quote-abc123/accept HTTP/1.1
+Host: localhost:5206
+Authorization: Bearer {passengerToken}
+```
+
+**Response** (200 OK):
+```json
+{
+  "message": "Quote accepted and booking created successfully",
+  "quoteId": "quote-abc123",
+  "quoteStatus": "Accepted",
+  "bookingId": "booking-new-xyz",
+  "bookingStatus": "Requested",
+  "sourceQuoteId": "quote-abc123"
+}
+```
+
+**FSM Validation**:
+- Can only accept quotes with status `Responded`
+- Transition: `Responded` ? `Accepted`
+
+**Ownership Validation**:
+- **Only the booker who created the quote can accept it**
+- Staff (admin/dispatcher) cannot accept quotes on behalf of passengers
+- User's `CreatedByUserId` must match quote's `CreatedByUserId`
+
+**Side Effects**:
+- Quote status updated to `Accepted`
+- New booking created with:
+  - Status: `Requested` (ready for staff confirmation)
+  - `SourceQuoteId` linking back to original quote
+  - `PickupDateTime` set to `EstimatedPickupTime` (if provided) or original `PickupDateTime`
+  - `CreatedByUserId` set to current user
+- **Email sent to Bellwood staff** notifying of quote acceptance
+- Audit logs created (quote acceptance + booking creation)
+
+**Error Responses**:
+- **404 Not Found**: Quote doesn't exist
+- **403 Forbidden**:
+  - User doesn't own the quote
+  - Staff user attempting to accept on behalf of passenger
+- **400 Bad Request**: Quote status is not `Responded`
+
+---
+
+### POST /quotes/{id}/cancel
+
+**Description**: Cancel a quote
+
+**Auth**: Required (owner or staff)
+
+**Request**:
+```http
+POST /quotes/quote-abc123/cancel HTTP/1.1
+Host: localhost:5206
+Authorization: Bearer {token}
+```
+
+**Response** (200 OK):
+```json
+{
+  "message": "Quote cancelled successfully",
+  "id": "quote-abc123",
+  "status": "Cancelled"
+}
+```
+
+**Authorization**:
+- **Bookers**: Can cancel their own quotes (via `CreatedByUserId`)
+- **Staff**: Can cancel any quote
+
+**Validation**:
+- Cannot cancel quotes with status `Accepted` or `Cancelled`
+
+**Side Effects**:
+- Quote status updated to `Cancelled`
+- `ModifiedByUserId` and `ModifiedOnUtc` updated
+- Audit log created
+
+**Error Responses**:
+- **404 Not Found**: Quote doesn't exist
+- **403 Forbidden**: User doesn't have permission to cancel
+- **400 Bad Request**: Cannot cancel quote with current status
+
+---
+
 ### POST /quotes/seed
 
 **Description**: Seed sample quotes (DEV ONLY)
