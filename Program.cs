@@ -709,6 +709,7 @@ app.MapPost("/quotes/{id}/respond", async (
     [FromBody] QuoteResponseRequest request,
     HttpContext context,
     IQuoteRepository repo,
+    IEmailSender email,
     AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
 {
@@ -783,6 +784,18 @@ app.MapPost("/quotes/{id}/respond", async (
         },
         httpContext: context);
 
+    // Phase Alpha: Send email notification to passenger
+    try
+    {
+        await email.SendQuoteResponseAsync(quote);
+        log.LogInformation("Quote response email sent to passenger for quote {Id}", id);
+    }
+    catch (Exception ex)
+    {
+        log.LogError(ex, "Failed to send quote response email for quote {Id}", id);
+        // Continue anyway - quote response is saved
+    }
+
     log.LogInformation("Quote {Id} responded to by {UserId} with price ${Price} for passenger {Passenger}",
         id, currentUserId, quote.EstimatedPrice, quote.PassengerName);
 
@@ -807,6 +820,7 @@ app.MapPost("/quotes/{id}/accept", async (
     HttpContext context,
     IQuoteRepository quoteRepo,
     IBookingRepository bookingRepo,
+    IEmailSender email,
     AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
 {
@@ -923,6 +937,19 @@ app.MapPost("/quotes/{id}/accept", async (
             pickupDateTime = booking.PickupDateTime
         },
         httpContext: context);
+
+    // Phase Alpha: Send email notification to Bellwood staff
+    try
+    {
+        await email.SendQuoteAcceptedAsync(quote, booking.Id);
+        log.LogInformation("Quote accepted email sent to staff for quote {QuoteId}, booking {BookingId}", 
+            id, booking.Id);
+    }
+    catch (Exception ex)
+    {
+        log.LogError(ex, "Failed to send quote accepted email for quote {QuoteId}", id);
+        // Continue anyway - quote acceptance is saved
+    }
 
     log.LogInformation("Quote {QuoteId} accepted by {UserId}, created booking {BookingId} for passenger {Passenger}",
         id, currentUserId, booking.Id, quote.PassengerName);
