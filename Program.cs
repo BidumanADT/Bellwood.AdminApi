@@ -720,15 +720,21 @@ app.MapPost("/quotes/{id}/respond", async (
     if (request.EstimatedPrice <= 0)
         return Results.BadRequest(new { error = "EstimatedPrice must be greater than 0" });
 
-    // FIX: Ensure both times are in UTC for fair comparison
-    // Handle both UTC and Unspecified DateTime.Kind
-    DateTime pickupTimeUtc = request.EstimatedPickupTime.Kind == DateTimeKind.Utc
-        ? request.EstimatedPickupTime
+    // Simple validation: pickup time must be in the future (allow 1 minute grace period for clock skew)
+    var now = DateTime.UtcNow;
+    var gracePeriod = now.AddMinutes(-1); // 1 minute in the past is OK (clock skew tolerance)
+    
+    // Treat Unspecified as UTC for validation (simplest approach)
+    var pickupTimeToValidate = request.EstimatedPickupTime.Kind == DateTimeKind.Utc 
+        ? request.EstimatedPickupTime 
         : DateTime.SpecifyKind(request.EstimatedPickupTime, DateTimeKind.Utc);
     
-    // Allow 10-second grace period for clock skew
-    if (pickupTimeUtc <= DateTime.UtcNow.AddSeconds(10))
+    if (pickupTimeToValidate <= gracePeriod)
+    {
+        log.LogWarning("EstimatedPickupTime rejected: {PickupTime} is not after {GracePeriod}", 
+            pickupTimeToValidate, gracePeriod);
         return Results.BadRequest(new { error = "EstimatedPickupTime must be in the future" });
+    }
 
     // Find quote
     var quote = await repo.GetAsync(id);
@@ -949,7 +955,7 @@ app.MapPost("/quotes/{id}/cancel", async (
     // Find quote
     var quote = await repo.GetAsync(id);
     if (quote is null)
-        return Results.NotFound(new { error = "Quote not found" });
+        return Results.NotFound();
 
     // Verify permission (owner or staff)
     if (!CanAccessRecord(user, quote.CreatedByUserId))
@@ -1458,7 +1464,7 @@ app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepo
         var unspecified = DateTime.SpecifyKind(rec.PickupDateTime, DateTimeKind.Unspecified);
         pickupOffset = new DateTimeOffset(unspecified, userTz.GetUtcOffset(unspecified));
     }
-    
+
     // FIX: Convert CreatedUtc to user's local timezone
     var createdLocal = TimeZoneInfo.ConvertTimeFromUtc(rec.CreatedUtc, userTz);
     var createdOffset = new DateTimeOffset(createdLocal, userTz.GetUtcOffset(createdLocal));
