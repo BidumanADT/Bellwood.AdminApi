@@ -73,6 +73,24 @@ public sealed class FileQuoteRepository : IQuoteRepository
         return (await ReadAllAsync()).Take(take).ToList();
     }
 
+    // Phase Alpha: Update complete quote record (for lifecycle transitions)
+    public async Task UpdateAsync(QuoteRecord rec, CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync();
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var list = await ReadAllAsync();
+            var idx = list.FindIndex(x => x.Id == rec.Id);
+            if (idx >= 0)
+            {
+                list[idx] = rec;
+                await WriteAllAsync(list);
+            }
+        }
+        finally { _gate.Release(); }
+    }
+
     public async Task UpdateStatusAsync(string id, QuoteStatus status, CancellationToken ct = default)
     {
         await EnsureInitializedAsync();

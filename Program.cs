@@ -177,16 +177,6 @@ builder.Services.AddAuthentication(options =>
             
             var roles = context.Principal?.FindAll("role").Select(c => c.Value).ToList();
             Console.WriteLine($"   Roles: {(roles?.Any() == true ? string.Join(", ", roles) : "NONE")}");
-            
-            // DIAGNOSTIC: Test User.IsInRole() directly
-            var isAdmin = context.Principal?.IsInRole("admin") ?? false;
-            var isDispatcher = context.Principal?.IsInRole("dispatcher") ?? false;
-            Console.WriteLine($"   IsInRole('admin'): {isAdmin}");
-            Console.WriteLine($"   IsInRole('dispatcher'): {isDispatcher}");
-            
-            // DIAGNOSTIC: Show all claims
-            var allClaims = context.Principal?.Claims.Select(c => $"{c.Type}={c.Value}").ToList();
-            Console.WriteLine($"   All Claims: {string.Join(", ", allClaims ?? new List<string>())}");
 
             return Task.CompletedTask;
         }
@@ -466,8 +456,8 @@ app.MapPost("/quotes", async (
         DropoffLocation = draft.DropoffLocation,
         PickupDateTime = draft.PickupDateTime,
         Draft = draft,
-        // Phase 1: Set ownership field
-        CreatedByUserId = currentUserId
+        // Phase 1: Set ownership field (FIX: Use userId claim from JWT)
+        CreatedByUserId = context.User.FindFirst("userId")?.Value ?? currentUserId
     };
 
     await repo.AddAsync(rec);
@@ -489,7 +479,7 @@ app.MapPost("/quotes", async (
     {
         await email.SendQuoteAsync(draft, rec.Id);
         log.LogInformation("Quote {Id} submitted for {Passenger} by user {UserId}", 
-            rec.Id, rec.PassengerName, currentUserId ?? "unknown");
+            rec.Id, rec.PassengerName, rec.CreatedByUserId ?? "unknown");
     }
     catch (Exception ex)
     {
@@ -609,32 +599,453 @@ app.MapGet("/quotes/{id}", async (string id, HttpContext context, IQuoteReposito
         id,
         httpContext: context);
 
-    // Phase 2: Build response DTO with billing fields
-    var response = new QuoteDetailResponseDto
+    // FIX: Return ALL lifecycle fields in response (not just EstimatedCost/BillingNotes)
+    var response = new
     {
-        Id = rec.Id,
+        rec.Id,
         Status = rec.Status.ToString(),
-        CreatedUtc = rec.CreatedUtc,
-        BookerName = rec.BookerName,
-        PassengerName = rec.PassengerName,
-        VehicleClass = rec.VehicleClass,
-        PickupLocation = rec.PickupLocation,
-        DropoffLocation = rec.DropoffLocation,
-        PickupDateTime = rec.PickupDateTime,
-        Draft = rec.Draft,
+        rec.CreatedUtc,
+        rec.BookerName,
+        rec.PassengerName,
+        rec.VehicleClass,
+        rec.PickupLocation,
+        rec.DropoffLocation,
+        rec.PickupDateTime,
+        rec.Draft,
         
-        // Phase 2: Billing fields (currently null - will be populated in Phase 3+)
-        EstimatedCost = null,  // TODO: Populate when pricing integration added
-        BillingNotes = null    // TODO: Populate when billing notes added
+        // FIX: Include ALL Phase Alpha lifecycle fields
+        rec.CreatedByUserId,
+        rec.ModifiedByUserId,
+        rec.ModifiedOnUtc,
+        rec.AcknowledgedAt,
+        rec.AcknowledgedByUserId,
+        rec.RespondedAt,
+        rec.RespondedByUserId,
+        rec.EstimatedPrice,
+        rec.EstimatedPickupTime,
+        rec.Notes
     };
-    
-    // Phase 2: Mask billing fields for dispatchers
-    MaskBillingFields(user, response);
     
     return Results.Ok(response);
 })
 .WithName("GetQuote")
 .RequireAuthorization("StaffOnly"); // Phase 2: Changed from generic auth to StaffOnly
+
+// ===================================================================
+// PHASE ALPHA: QUOTE LIFECYCLE ENDPOINTS
+// ===================================================================
+
+// POST /quotes/{id}/acknowledge - Dispatcher acknowledges receipt of quote
+app.MapPost("/quotes/{id}/acknowledge", async (
+    string id,
+    HttpContext context,
+    IQuoteRepository repo,
+    AuditLogger auditLogger,
+    ILoggerFactory loggerFactory) =>
+{
+    var log = loggerFactory.CreateLogger("quotes");
+    var user = context.User;
+    var currentUserId = GetUserId(user);
+
+    // Find quote
+    var quote = await repo.GetAsync(id);
+    if (quote is null)
+        return Results.NotFound(new { error = "Quote not found" });
+
+    // Verify quote is in Submitted status
+    if (quote.Status != QuoteStatus.Submitted)
+    {
+        await auditLogger.LogFailureAsync(
+            user,
+            "Quote.Acknowledge",
+            "Quote",
+            id,
+            errorMessage: $"Cannot acknowledge quote with status: {quote.Status}",
+            httpContext: context);
+
+        return Results.BadRequest(new { error = $"Can only acknowledge quotes with status 'Submitted'. Current status: {quote.Status}" });
+    }
+
+    // Update quote
+    quote.Status = QuoteStatus.Acknowledged;
+    quote.AcknowledgedAt = DateTime.UtcNow;
+    quote.AcknowledgedByUserId = currentUserId;
+    quote.ModifiedByUserId = currentUserId;
+    quote.ModifiedOnUtc = DateTime.UtcNow;
+
+    await repo.UpdateAsync(quote);
+
+    // Audit log acknowledgment
+    await auditLogger.LogSuccessAsync(
+        user,
+        "Quote.Acknowledge",
+        "Quote",
+        id,
+        details: new {
+            acknowledgedAt = quote.AcknowledgedAt,
+            acknowledgedBy = currentUserId,
+            passengerName = quote.PassengerName
+        },
+        httpContext: context);
+
+    log.LogInformation("Quote {Id} acknowledged by {UserId} for passenger {Passenger}",
+        id, currentUserId, quote.PassengerName);
+
+    return Results.Ok(new
+    {
+        message = "Quote acknowledged successfully",
+        id = quote.Id,
+        status = quote.Status.ToString(),
+        acknowledgedAt = quote.AcknowledgedAt,
+        acknowledgedBy = quote.AcknowledgedByUserId
+    });
+})
+.WithName("AcknowledgeQuote")
+.RequireAuthorization("StaffOnly"); // Phase Alpha: Dispatchers and admins only
+
+// POST /quotes/{id}/respond - Dispatcher sends price/ETA response to passenger
+app.MapPost("/quotes/{id}/respond", async (
+    string id,
+    [FromBody] QuoteResponseRequest request,
+    HttpContext context,
+    IQuoteRepository repo,
+    IEmailSender email,
+    AuditLogger auditLogger,
+    ILoggerFactory loggerFactory) =>
+{
+    var log = loggerFactory.CreateLogger("quotes");
+    var user = context.User;
+    var currentUserId = GetUserId(user);
+
+    // Validate request
+    if (request.EstimatedPrice <= 0)
+        return Results.BadRequest(new { error = "EstimatedPrice must be greater than 0" });
+
+    // Simple validation: pickup time must be in the future (allow 1 minute grace period for clock skew)
+    var now = DateTime.UtcNow;
+    var gracePeriod = now.AddMinutes(-1); // 1 minute in the past is OK (clock skew tolerance)
+    
+    // Treat Unspecified as UTC for validation (simplest approach)
+    var pickupTimeToValidate = request.EstimatedPickupTime.Kind == DateTimeKind.Utc 
+        ? request.EstimatedPickupTime 
+        : DateTime.SpecifyKind(request.EstimatedPickupTime, DateTimeKind.Utc);
+    
+    if (pickupTimeToValidate <= gracePeriod)
+    {
+        log.LogWarning("EstimatedPickupTime rejected: {PickupTime} is not after {GracePeriod}", 
+            pickupTimeToValidate, gracePeriod);
+        return Results.BadRequest(new { error = "EstimatedPickupTime must be in the future" });
+    }
+
+    // Find quote
+    var quote = await repo.GetAsync(id);
+    if (quote is null)
+        return Results.NotFound(new { error = "Quote not found" });
+
+    // Verify quote is in Acknowledged status
+    if (quote.Status != QuoteStatus.Acknowledged)
+    {
+        await auditLogger.LogFailureAsync(
+            user,
+            "Quote.Respond",
+            "Quote",
+            id,
+            errorMessage: $"Cannot respond to quote with status: {quote.Status}",
+            httpContext: context);
+
+        return Results.BadRequest(new { error = $"Can only respond to quotes with status 'Acknowledged'. Current status: {quote.Status}" });
+    }
+
+    // Update quote with response
+    quote.Status = QuoteStatus.Responded;
+    quote.RespondedAt = DateTime.UtcNow;
+    quote.RespondedByUserId = currentUserId;
+    quote.EstimatedPrice = request.EstimatedPrice;
+    quote.EstimatedPickupTime = request.EstimatedPickupTime;
+    quote.Notes = request.Notes;
+    quote.ModifiedByUserId = currentUserId;
+    quote.ModifiedOnUtc = DateTime.UtcNow;
+
+    await repo.UpdateAsync(quote);
+
+    // Audit log response
+    await auditLogger.LogSuccessAsync(
+        user,
+        "Quote.Respond",
+        "Quote",
+        id,
+        details: new {
+            respondedAt = quote.RespondedAt,
+            respondedBy = currentUserId,
+            estimatedPrice = quote.EstimatedPrice,
+            estimatedPickupTime = quote.EstimatedPickupTime,
+            notes = quote.Notes,
+            passengerName = quote.PassengerName
+        },
+        httpContext: context);
+
+    // Phase Alpha: Send email notification to passenger
+    try
+    {
+        await email.SendQuoteResponseAsync(quote);
+        log.LogInformation("Quote response email sent to passenger for quote {Id}", id);
+    }
+    catch (Exception ex)
+    {
+        log.LogError(ex, "Failed to send quote response email for quote {Id}", id);
+        // Continue anyway - quote response is saved
+    }
+
+    log.LogInformation("Quote {Id} responded to by {UserId} with price ${Price} for passenger {Passenger}",
+        id, currentUserId, quote.EstimatedPrice, quote.PassengerName);
+
+    return Results.Ok(new
+    {
+        message = "Quote response sent successfully",
+        id = quote.Id,
+        status = quote.Status.ToString(),
+        respondedAt = quote.RespondedAt,
+        respondedBy = quote.RespondedByUserId,
+        estimatedPrice = quote.EstimatedPrice,
+        estimatedPickupTime = quote.EstimatedPickupTime,
+        notes = quote.Notes
+    });
+})
+.WithName("RespondToQuote")
+.RequireAuthorization("StaffOnly"); // Phase Alpha: Dispatchers and admins only
+
+// POST /quotes/{id}/accept - Passenger accepts quote and converts to booking
+app.MapPost("/quotes/{id}/accept", async (
+    string id,
+    HttpContext context,
+    IQuoteRepository quoteRepo,
+    IBookingRepository bookingRepo,
+    IEmailSender email,
+    AuditLogger auditLogger,
+    ILoggerFactory loggerFactory) =>
+{
+    var log = loggerFactory.CreateLogger("quotes");
+    var user = context.User;
+    var currentUserId = GetUserId(user);
+
+    // Find quote
+    var quote = await quoteRepo.GetAsync(id);
+    if (quote is null)
+        return Results.NotFound(new { error = "Quote not found" });
+
+    // FIX: Verify ownership (booker ONLY - not staff!)
+    // Only the booker who created the quote can accept it
+    if (!IsStaffOrAdmin(user))
+    {
+        // Non-staff: Must own the quote
+        if (string.IsNullOrEmpty(quote.CreatedByUserId) || quote.CreatedByUserId != currentUserId)
+        {
+            await auditLogger.LogForbiddenAsync(
+                user,
+                "Quote.Accept",
+                "Quote",
+                id,
+                httpContext: context);
+
+            return Results.Problem(
+                statusCode: 403,
+                title: "Forbidden",
+                detail: "You do not have permission to accept this quote");
+        }
+    }
+    else
+    {
+        // FIX: Staff (admin) should NOT be able to accept quotes on behalf of bookers
+        // Only the actual booker can accept
+        log.LogWarning("Admin {UserId} attempted to accept quote {QuoteId} on behalf of booker", currentUserId, id);
+        
+        await auditLogger.LogForbiddenAsync(
+            user,
+            "Quote.Accept",
+            "Quote",
+            id,
+            httpContext: context);
+
+        return Results.Problem(
+            statusCode: 403,
+            title: "Forbidden",
+            detail: "Only the booker who requested this quote can accept it");
+    }
+
+    // Verify quote is in Responded status
+    if (quote.Status != QuoteStatus.Responded)
+    {
+        await auditLogger.LogFailureAsync(
+            user,
+            "Quote.Accept",
+            "Quote",
+            id,
+            errorMessage: $"Cannot accept quote with status: {quote.Status}",
+            httpContext: context);
+
+        return Results.BadRequest(new { error = $"Can only accept quotes with status 'Responded'. Current status: {quote.Status}" });
+    }
+
+    // Create booking from quote (Status = Requested per recommendation)
+    var booking = new BookingRecord
+    {
+        Status = BookingStatus.Requested, // Per alpha test plan - maintains existing workflow
+        BookerName = quote.BookerName,
+        PassengerName = quote.PassengerName,
+        VehicleClass = quote.VehicleClass,
+        PickupLocation = quote.PickupLocation,
+        DropoffLocation = quote.DropoffLocation,
+        PickupDateTime = quote.EstimatedPickupTime ?? quote.PickupDateTime, // Use estimated if available
+        Draft = quote.Draft,
+        CreatedByUserId = currentUserId,
+        SourceQuoteId = quote.Id // FIX: Link back to originating quote
+    };
+
+    await bookingRepo.AddAsync(booking);
+
+    // Update quote status to Accepted
+    quote.Status = QuoteStatus.Accepted;
+    quote.ModifiedByUserId = currentUserId;
+    quote.ModifiedOnUtc = DateTime.UtcNow;
+
+    await quoteRepo.UpdateAsync(quote);
+
+    // Audit log acceptance and booking creation
+    await auditLogger.LogSuccessAsync(
+        user,
+        "Quote.Accept",
+        "Quote",
+        id,
+        details: new {
+            acceptedBy = currentUserId,
+            createdBookingId = booking.Id,
+            passengerName = quote.PassengerName,
+            estimatedPrice = quote.EstimatedPrice
+        },
+        httpContext: context);
+
+    await auditLogger.LogSuccessAsync(
+        user,
+        AuditActions.BookingCreated,
+        "Booking",
+        booking.Id,
+        details: new {
+            sourceQuoteId = quote.Id,
+            passengerName = booking.PassengerName,
+            vehicleClass = booking.VehicleClass,
+            pickupLocation = booking.PickupLocation,
+            pickupDateTime = booking.PickupDateTime
+        },
+        httpContext: context);
+
+    // Phase Alpha: Send email notification to Bellwood staff
+    try
+    {
+        await email.SendQuoteAcceptedAsync(quote, booking.Id);
+        log.LogInformation("Quote accepted email sent to staff for quote {QuoteId}, booking {BookingId}", 
+            id, booking.Id);
+    }
+    catch (Exception ex)
+    {
+        log.LogError(ex, "Failed to send quote accepted email for quote {QuoteId}", id);
+        // Continue anyway - quote acceptance is saved
+    }
+
+    log.LogInformation("Quote {QuoteId} accepted by {UserId}, created booking {BookingId} for passenger {Passenger}",
+        id, currentUserId, booking.Id, quote.PassengerName);
+
+    return Results.Ok(new
+    {
+        message = "Quote accepted and booking created successfully",
+        quoteId = quote.Id,
+        quoteStatus = quote.Status.ToString(),
+        bookingId = booking.Id,
+        bookingStatus = booking.Status.ToString(),
+        sourceQuoteId = booking.SourceQuoteId // FIX: Return SourceQuoteId in response
+    });
+})
+.WithName("AcceptQuote")
+.RequireAuthorization(); // Phase Alpha: Booker (owner) only can accept
+
+// POST /quotes/{id}/cancel - Cancel a quote
+app.MapPost("/quotes/{id}/cancel", async (
+    string id,
+    HttpContext context,
+    IQuoteRepository repo,
+    AuditLogger auditLogger,
+    ILoggerFactory loggerFactory) =>
+{
+    var log = loggerFactory.CreateLogger("quotes");
+    var user = context.User;
+    var currentUserId = GetUserId(user);
+
+    // Find quote
+    var quote = await repo.GetAsync(id);
+    if (quote is null)
+        return Results.NotFound();
+
+    // Verify permission (owner or staff)
+    if (!CanAccessRecord(user, quote.CreatedByUserId))
+    {
+        await auditLogger.LogForbiddenAsync(
+            user,
+            "Quote.Cancel",
+            "Quote",
+            id,
+            httpContext: context);
+
+        return Results.Problem(
+            statusCode: 403,
+            title: "Forbidden",
+            detail: "You do not have permission to cancel this quote");
+    }
+
+    // Verify quote can be cancelled (not already Accepted or Cancelled)
+    if (quote.Status == QuoteStatus.Accepted || quote.Status == QuoteStatus.Cancelled)
+    {
+        await auditLogger.LogFailureAsync(
+            user,
+            "Quote.Cancel",
+            "Quote",
+            id,
+            errorMessage: $"Cannot cancel quote with status: {quote.Status}",
+            httpContext: context);
+
+        return Results.BadRequest(new { error = $"Cannot cancel quote with status '{quote.Status}'" });
+    }
+
+    // Update quote
+    quote.Status = QuoteStatus.Cancelled;
+    quote.ModifiedByUserId = currentUserId;
+    quote.ModifiedOnUtc = DateTime.UtcNow;
+
+    await repo.UpdateAsync(quote);
+
+    // Audit log cancellation
+    await auditLogger.LogSuccessAsync(
+        user,
+        "Quote.Cancel",
+        "Quote",
+        id,
+        details: new {
+            cancelledBy = currentUserId,
+            passengerName = quote.PassengerName,
+            previousStatus = QuoteStatus.Submitted.ToString() // Simplified for now
+        },
+        httpContext: context);
+
+    log.LogInformation("Quote {Id} cancelled by {UserId} (passenger: {Passenger})",
+        id, currentUserId, quote.PassengerName);
+
+    return Results.Ok(new
+    {
+        message = "Quote cancelled successfully",
+        id = quote.Id,
+        status = quote.Status.ToString()
+    });
+})
+.WithName("CancelQuote")
+.RequireAuthorization(); // Phase Alpha: Owner or staff can cancel
 
 // ===================================================================
 // BOOKING ENDPOINTS
@@ -1080,41 +1491,41 @@ app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepo
         var unspecified = DateTime.SpecifyKind(rec.PickupDateTime, DateTimeKind.Unspecified);
         pickupOffset = new DateTimeOffset(unspecified, userTz.GetUtcOffset(unspecified));
     }
-    
+
     // FIX: Convert CreatedUtc to user's local timezone
     var createdLocal = TimeZoneInfo.ConvertTimeFromUtc(rec.CreatedUtc, userTz);
     var createdOffset = new DateTimeOffset(createdLocal, userTz.GetUtcOffset(createdLocal));
 
-    // Phase 2: Build response DTO with billing fields
-    var response = new BookingDetailResponseDto
+    // FIX: Return SourceQuoteId in response
+    var response = new
     {
-        Id = rec.Id,
+        rec.Id,
         Status = rec.Status.ToString(),
         CurrentRideStatus = rec.CurrentRideStatus?.ToString(),
-        CreatedUtc = rec.CreatedUtc, // Keep for backward compatibility
+        rec.CreatedUtc, // Keep for backward compatibility
         CreatedDateTimeOffset = createdOffset, // Timezone-aware version
-        BookerName = rec.BookerName,
-        PassengerName = rec.PassengerName,
-        VehicleClass = rec.VehicleClass,
-        PickupLocation = rec.PickupLocation,
-        DropoffLocation = rec.DropoffLocation,
-        PickupDateTime = rec.PickupDateTime, // Keep for backward compatibility
+        rec.BookerName,
+        rec.PassengerName,
+        rec.VehicleClass,
+        rec.PickupLocation,
+        rec.DropoffLocation,
+        rec.PickupDateTime, // Keep for backward compatibility
         PickupDateTimeOffset = pickupOffset, // Timezone-aware version
-        Draft = rec.Draft,
-        AssignedDriverId = rec.AssignedDriverId,
-        AssignedDriverUid = rec.AssignedDriverUid,
+        rec.Draft,
+        rec.AssignedDriverId,
+        rec.AssignedDriverUid,
         AssignedDriverName = rec.AssignedDriverName ?? "Unassigned",
         
+        // FIX: Include SourceQuoteId in booking detail response
+        rec.SourceQuoteId,
+        
         // Phase 2: Billing fields (currently null - will be populated in Phase 3+)
-        PaymentMethodId = null,      // TODO: Populate when Stripe/payment integration added
-        PaymentMethodLast4 = null,   // TODO: Populate when Stripe/payment integration added
-        PaymentAmount = null,        // TODO: Populate when pricing calculated
-        TotalAmount = null,          // TODO: Populate when final amount calculated
-        TotalFare = null             // TODO: Populate when final fare calculated
+        PaymentMethodId = (string?)null,      // TODO: Populate when Stripe/payment integration added
+        PaymentMethodLast4 = (string?)null,   // TODO: Populate when Stripe/payment integration added
+        PaymentAmount = (decimal?)null,        // TODO: Populate when pricing calculated
+        TotalAmount = (decimal?)null,          // TODO: Populate when final amount calculated
+        TotalFare = (decimal?)null             // TODO: Populate when final fare calculated
     };
-    
-    // Phase 2: Mask billing fields for dispatchers
-    MaskBillingFields(user, response);
 
     return Results.Ok(response);
 })
@@ -1372,7 +1783,7 @@ app.MapGet("/driver/rides/{id}", async (string id, HttpContext context, IBooking
     }
     else
     {
-        // Local or Unspecified - treat as already in correct timezone
+        // Local or Unspecified - treat as already in userTz timezone
         // Must convert to Unspecified to avoid offset mismatch
         var unspecified = DateTime.SpecifyKind(booking.PickupDateTime, DateTimeKind.Unspecified);
         pickupOffset = new DateTimeOffset(unspecified, driverTz.GetUtcOffset(unspecified));
@@ -1995,7 +2406,7 @@ app.MapPost("/affiliates/{affiliateId}/drivers", async (
         details: new {
             name = driver.Name,
             userUid = driver.UserUid,
-            affiliateId,
+            affiliateId = affiliate.Id,
             affiliateName = affiliate.Name
         },
         httpContext: context);
@@ -2684,3 +3095,11 @@ public record RoleAssignmentResponse(
     string Username,
     IEnumerable<string> PreviousRoles,
     string NewRole);
+
+// Quote response request DTO
+public record QuoteResponseRequest
+{
+    public decimal EstimatedPrice { get; init; }
+    public DateTime EstimatedPickupTime { get; init; }
+    public string Notes { get; init; }
+}

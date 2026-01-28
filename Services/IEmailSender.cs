@@ -10,5 +10,9 @@ namespace Bellwood.AdminApi.Services
         Task SendBookingAsync(QuoteDraft draft, string referenceId);
         Task SendBookingCancellationAsync(QuoteDraft draft, string referenceId, string bookerName);
         Task SendDriverAssignmentAsync(BookingRecord booking, Driver driver, Affiliate affiliate);
+        
+        // Phase Alpha: Quote lifecycle email notifications
+        Task SendQuoteResponseAsync(QuoteRecord quote);
+        Task SendQuoteAcceptedAsync(QuoteRecord quote, string bookingId);
     }
 }

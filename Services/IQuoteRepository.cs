@@ -7,6 +7,11 @@ namespace Bellwood.AdminApi.Services
         Task<QuoteRecord> AddAsync(QuoteRecord rec, CancellationToken ct = default);
         Task<QuoteRecord?> GetAsync(string id, CancellationToken ct = default);
         Task<IReadOnlyList<QuoteRecord>> ListAsync(int take = 50, CancellationToken ct = default);
+        
+        // Phase Alpha: Update complete quote record (lifecycle transitions)
+        Task UpdateAsync(QuoteRecord rec, CancellationToken ct = default);
+        
+        // Legacy method - kept for backward compatibility
         Task UpdateStatusAsync(string id, QuoteStatus status, CancellationToken ct = default);
     }
 }
