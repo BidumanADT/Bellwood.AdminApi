@@ -838,3 +838,162 @@ az network nsg rule list --nsg-name BellwoodNSG --resource-group BellwoodAPI
 **Last Updated**: January 14, 2026  
 **Status**: ? Production Ready  
 **Troubleshooting Version**: 2.0
+
+---
+
+## ?? Quote Lifecycle Troubleshooting (Phase Alpha)
+
+### Issue 11: Quote lifecycle fields not populated
+
+**Symptom**: `CreatedByUserId`, `AcknowledgedAt`, `RespondedAt`, or `SourceQuoteId` fields are null.
+
+**Common Causes**:
+1. JWT token missing `uid` claim ? `CreatedByUserId` not populated
+2. Quote detail endpoint not returning all fields
+3. Booking created from quote missing `SourceQuoteId`
+
+**Quick Fix**:
+
+```powershell
+# Verify JWT token has required claims
+$token = "..."  # Your access token
+$payload = [System.Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String(
+        ($token.Split('.')[1] + "===").Substring(0, 
+        ($token.Split('.')[1].Length + 3) -band -4)))
+$claims = $payload | ConvertFrom-Json
+Write-Host "UID claim: $($claims.uid)"  # Should be populated
+```
+
+**Solution**: AuthServer must include `uid` claim in JWT. AdminAPI extracts `userId` from this claim.
+
+---
+
+### Issue 12: Admin can accept passenger quotes (CRITICAL SECURITY)
+
+**Symptom**: Admin user successfully accepts quotes created by other users.
+
+**Impact**: **CRITICAL** - Allows fraudulent quote acceptance bypassing passenger consent.
+
+**Quick Test**:
+
+```powershell
+# This should FAIL with 403 Forbidden
+Invoke-RestMethod -Uri "https://localhost:5206/quotes/$passengerQuoteId/accept" `
+    -Method POST -Headers @{"Authorization"="Bearer $adminToken"}
+# Expected: 403 Forbidden (staff cannot accept on behalf of passengers)
+```
+
+**Solution**: Only the booker who created the quote can accept it. Staff (admin/dispatcher) are blocked from accepting quotes.
+
+**Fix Applied**: ? Complete (Phase Alpha implementation)
+
+---
+
+### Issue 13: Quote validation too strict
+
+**Symptom**: Valid pickup times rejected as "not in future" (e.g., 30 seconds from now).
+
+**Cause**: Clock skew between test script and server.
+
+**Solution**: 1-minute grace period added to time validation to handle clock skew.
+
+**Validation Logic**:
+
+```csharp
+// Allow 1-minute grace period for clock skew
+var gracePeriod = DateTime.UtcNow.AddMinutes(-1);
+if (pickupTime <= gracePeriod)
+    return BadRequest("EstimatedPickupTime must be in the future");
+```
+
+---
+
+### Issue 14: Phase Alpha tests failing
+
+**Symptom**: Tests pass locally but fail on staging/production.
+
+**Common Causes**:
+1. Test users don't exist in target environment
+2. JWT signing keys mismatch
+3. Data files not empty
+4. SMTP configuration incorrect (emails fail)
+
+**Quick Diagnostic**:
+
+```powershell
+# Run Phase Alpha test suite
+.\Scripts\Run-AllPhaseAlphaTests.ps1
+
+# Expected: 30/30 tests passing
+# If failures occur, check:
+# 1. Are chris, diana, alice users created?
+# 2. Do JWT keys match between AdminAPI and AuthServer?
+# 3. Run .\Scripts\Clear-TestData.ps1 first
+```
+
+**Solution**: See `31-Scripts-Reference.md` for detailed test script documentation.
+
+---
+
+## ?? Quick Diagnostic Commands
+
+```powershell
+# Health checks
+curl https://localhost:5206/health
+curl https://localhost:5001/health
+
+# Check data status
+.\Scripts\Get-TestDataStatus.ps1
+
+# Clear and reseed data
+.\Scripts\Clear-TestData.ps1
+.\Scripts\Seed-All.ps1
+
+# Run Phase Alpha tests
+.\Scripts\Run-AllPhaseAlphaTests.ps1
+
+# Check logs
+Get-Content ./logs/stdout*.log -Tail 50
+```
+
+---
+
+## ?? Related Documentation
+
+- `01-System-Architecture.md` - Overall system design
+- `02-Testing-Guide.md` - Testing workflows
+- `15-Quote-Lifecycle.md` - Quote lifecycle feature documentation
+- `20-API-Reference.md` - Endpoint documentation
+- `23-Security-Model.md` - Security & authorization
+- `30-Deployment-Guide.md` - Deployment instructions
+- `31-Scripts-Reference.md` - Test scripts (includes Phase Alpha suite)
+
+---
+
+## ?? Getting Help
+
+### Documentation
+
+1. Check this troubleshooting guide
+2. Review API Reference (`20-API-Reference.md`)
+3. Check Security Model (`23-Security-Model.md`)
+4. Review Quote Lifecycle docs (`15-Quote-Lifecycle.md`)
+
+### Logs
+
+1. Check console output (development)
+2. Check IIS logs (production)
+3. Check Application Insights (Azure)
+
+### Community
+
+1. GitHub Issues: https://github.com/BidumanADT/Bellwood.AdminApi/issues
+2. Team Slack: #bellwood-support
+3. Email: support@bellwood.com
+
+---
+
+**Last Updated**: January 27, 2026  
+**Status**: ? Production Ready  
+**Troubleshooting Version**: 3.0 (Phase Alpha)

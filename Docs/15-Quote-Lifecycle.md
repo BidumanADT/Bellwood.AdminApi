@@ -1,3 +1,20 @@
+# Quote Lifecycle Management
+
+**Document Type**: Living Document - Feature Documentation  
+**Last Updated**: January 27, 2026  
+**Status**: ? Production Ready
+
+---
+
+## ?? Overview
+
+This document describes the complete quote lifecycle workflow implementation (Phase Alpha), enabling dispatchers to respond to passenger quote requests with pricing and estimated pickup times, and allowing passengers to accept quotes to automatically create bookings.
+
+**Target Audience**: Developers, QA Engineers, Product Managers  
+**Prerequisites**: Understanding of REST APIs, JWT authentication, FSM (Finite State Machine) concepts
+
+---
+
 # Phase Alpha: Quote Lifecycle Implementation - Summary
 
 **Phase**: Alpha Test  
