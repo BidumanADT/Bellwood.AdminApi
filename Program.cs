@@ -301,7 +301,7 @@ app.MapPost("/quotes/seed", async (HttpContext context, IQuoteRepository repo, A
     {
         new QuoteRecord {
             CreatedUtc = now,
-            Status = QuoteStatus.Submitted,
+            Status = QuoteStatus.Pending,  // Changed from Submitted
             BookerName = "Alice Morgan",
             PassengerName = "Taylor Reed",
             VehicleClass = "Sedan",
@@ -652,8 +652,8 @@ app.MapPost("/quotes/{id}/acknowledge", async (
     if (quote is null)
         return Results.NotFound(new { error = "Quote not found" });
 
-    // Verify quote is in Submitted status
-    if (quote.Status != QuoteStatus.Submitted)
+    // Verify quote is in Pending status
+    if (quote.Status != QuoteStatus.Pending)
     {
         await auditLogger.LogFailureAsync(
             user,
@@ -663,7 +663,7 @@ app.MapPost("/quotes/{id}/acknowledge", async (
             errorMessage: $"Cannot acknowledge quote with status: {quote.Status}",
             httpContext: context);
 
-        return Results.BadRequest(new { error = $"Can only acknowledge quotes with status 'Submitted'. Current status: {quote.Status}" });
+        return Results.BadRequest(new { error = $"Can only acknowledge quotes with status 'Pending'. Current status: {quote.Status}" });
     }
 
     // Update quote
@@ -1030,7 +1030,7 @@ app.MapPost("/quotes/{id}/cancel", async (
         details: new {
             cancelledBy = currentUserId,
             passengerName = quote.PassengerName,
-            previousStatus = QuoteStatus.Submitted.ToString() // Simplified for now
+            previousStatus = quote.Status.ToString()  // Record the actual previous status
         },
         httpContext: context);
 
@@ -1522,7 +1522,7 @@ app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepo
         // Phase 2: Billing fields (currently null - will be populated in Phase 3+)
         PaymentMethodId = (string?)null,      // TODO: Populate when Stripe/payment integration added
         PaymentMethodLast4 = (string?)null,   // TODO: Populate when Stripe/payment integration added
-        PaymentAmount = (decimal?)null,        // TODO: Populate when pricing calculated
+        PaymentAmount = (decimal?)null,        // TODO: Populate when final amount calculated
         TotalAmount = (decimal?)null,          // TODO: Populate when final amount calculated
         TotalFare = (decimal?)null             // TODO: Populate when final fare calculated
     };
@@ -1625,6 +1625,7 @@ app.MapPost("/bookings/{id}/cancel", async (
 })
 .WithName("CancelBooking")
 .RequireAuthorization();
+
 
 // ===================================================================
 // DRIVER ENDPOINTS
@@ -2343,6 +2344,7 @@ app.MapDelete("/affiliates/{id}", async (
         details: new {
             name = existing.Name,
             email = existing.Email,
+            city = existing.City,
             cascadeDeletedDrivers = drivers.Count
         },
         httpContext: context);

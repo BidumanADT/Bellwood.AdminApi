@@ -3,7 +3,7 @@
 // Phase Alpha: Extended quote lifecycle status
 public enum QuoteStatus 
 { 
-    Submitted,      // Initial passenger request
+    Pending,        // Initial passenger request (renamed from Submitted)
     InReview,       // Legacy status (deprecated - use Acknowledged)
     Acknowledged,   // Dispatcher acknowledged receipt (Phase Alpha)
     Priced,         // Legacy status (deprecated - use Responded)
@@ -19,7 +19,7 @@ public sealed class QuoteRecord
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
-    public QuoteStatus Status { get; set; } = QuoteStatus.Submitted;
+    public QuoteStatus Status { get; set; } = QuoteStatus.Pending;  // Changed default
 
     // =====================================================================
     // OWNERSHIP & AUDIT FIELDS (Phase 1 - User Data Access Enforcement)
