@@ -56,7 +56,12 @@ builder.Services.AddDataProtection(); // ASP.NET Core Data Protection API
 builder.Services.AddMemoryCache(); // For credential caching
 builder.Services.AddSingleton<IOAuthCredentialRepository, FileOAuthCredentialRepository>();
 builder.Services.AddSingleton<OAuthCredentialService>();
-builder.Services.AddHttpClient<AuthServerUserManagementService>();
+builder.Services.AddHttpClient<AuthServerUserManagementService>()
+    .ConfigureHttpClient(client =>
+    {
+        // Prevent hanging if AuthServer is slow (not down)
+        client.Timeout = TimeSpan.FromSeconds(10);
+    });
 
 // Phase 4: LimoAnywhere integration (stub implementation)
 builder.Services.AddSingleton<ILimoAnywhereService, LimoAnywhereServiceStub>();
@@ -3142,10 +3147,10 @@ app.MapGet("/users/list", async (
         users = result.Items,
         pagination = new
         {
-            take,
+            total = result.Total,
             skip,
-            returned = result.Items.Count,
-            total = result.Total
+            take,
+            returned = result.Items.Count
         }
     });
 })
@@ -3334,35 +3339,5 @@ app.MapPut("/users/{userId}/disable", async (
 .WithTags("Admin", "Users");
 
 // ===================================================================
-// START APPLICATION
+// END OF FILE
 // ===================================================================
-
-Console.WriteLine("? Bellwood AdminAPI starting...");
-Console.WriteLine($"   Environment: {app.Environment.EnvironmentName}");
-Console.WriteLine($"   Listening on: https://localhost:5206");
-
-app.Run();
-
-Console.WriteLine("? Bellwood AdminAPI stopped.");
-
-// ===================================================================
-// DTOs
-// ===================================================================
-
-// Role assignment request DTO
-public record RoleAssignmentRequest(string Role);
-
-// Role assignment response DTO (from AuthServer)
-public record RoleAssignmentResponse(
-    string Message,
-    string Username,
-    IEnumerable<string> PreviousRoles,
-    string NewRole);
-
-// Quote response request DTO
-public record QuoteResponseRequest
-{
-    public decimal EstimatedPrice { get; init; }
-    public DateTime EstimatedPickupTime { get; init; }
-    public string Notes { get; init; }
-}
