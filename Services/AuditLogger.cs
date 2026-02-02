@@ -206,4 +206,10 @@ public static class AuditActions
     public const string SystemStartup = "System.Startup";
     public const string SystemShutdown = "System.Shutdown";
     public const string DataRetentionCleanup = "System.DataRetention.Cleanup";
+
+    // User management actions
+    public const string UserCreated = "User.Created";
+    public const string UserListed = "User.Listed";
+    public const string UserRolesUpdated = "User.Roles.Updated";
+    public const string UserDisabledUpdated = "User.Disabled.Updated";
 }

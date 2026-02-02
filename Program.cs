@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using System.Text.Json.Serialization;
 using Bellwood.AdminApi.Models;
@@ -55,6 +56,12 @@ builder.Services.AddDataProtection(); // ASP.NET Core Data Protection API
 builder.Services.AddMemoryCache(); // For credential caching
 builder.Services.AddSingleton<IOAuthCredentialRepository, FileOAuthCredentialRepository>();
 builder.Services.AddSingleton<OAuthCredentialService>();
+builder.Services.AddHttpClient<AuthServerUserManagementService>()
+    .ConfigureHttpClient(client =>
+    {
+        // Prevent hanging if AuthServer is slow (not down)
+        client.Timeout = TimeSpan.FromSeconds(10);
+    });
 
 // Phase 4: LimoAnywhere integration (stub implementation)
 builder.Services.AddSingleton<ILimoAnywhereService, LimoAnywhereServiceStub>();
@@ -283,6 +290,19 @@ static async Task WriteHealthCheckResponse(HttpContext context, HealthReport rep
     }, new JsonSerializerOptions { WriteIndented = true });
 
     await context.Response.WriteAsync(result);
+}
+
+static string? GetBearerToken(HttpContext context)
+{
+    var authorizationHeader = context.Request.Headers.Authorization.ToString();
+    if (string.IsNullOrWhiteSpace(authorizationHeader))
+    {
+        return null;
+    }
+
+    return authorizationHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+        ? authorizationHeader["Bearer ".Length..].Trim()
+        : null;
 }
 
 // ===================================================================
@@ -3073,35 +3093,251 @@ app.MapPost("/api/admin/data-protection/test", (
 .WithTags("Admin", "DataProtection");
 
 // ===================================================================
-// START APPLICATION
+// ADMIN PORTAL USER MANAGEMENT ENDPOINTS (Admin-Only)
 // ===================================================================
 
-Console.WriteLine("? Bellwood AdminAPI starting...");
-Console.WriteLine($"   Environment: {app.Environment.EnvironmentName}");
-Console.WriteLine($"   Listening on: https://localhost:5206");
+const int MinTempPasswordLength = 10;
+const int MaxUsersPageSize = 200;
 
-app.Run();
-
-Console.WriteLine("? Bellwood AdminAPI stopped.");
-
-// ===================================================================
-// DTOs
-// ===================================================================
-
-// Role assignment request DTO
-public record RoleAssignmentRequest(string Role);
-
-// Role assignment response DTO (from AuthServer)
-public record RoleAssignmentResponse(
-    string Message,
-    string Username,
-    IEnumerable<string> PreviousRoles,
-    string NewRole);
-
-// Quote response request DTO
-public record QuoteResponseRequest
+// GET /users/list - List users (paged)
+app.MapGet("/users/list", async (
+    HttpContext context,
+    [FromQuery] int take,
+    [FromQuery] int skip,
+    AuthServerUserManagementService userService,
+    AuditLogger auditLogger,
+    CancellationToken ct) =>
 {
-    public decimal EstimatedPrice { get; init; }
-    public DateTime EstimatedPickupTime { get; init; }
-    public string Notes { get; init; }
-}
+    if (take <= 0) take = 50;
+    if (take > MaxUsersPageSize) take = MaxUsersPageSize;
+    if (skip < 0) skip = 0;
+
+    var bearerToken = GetBearerToken(context);
+    var result = await userService.ListUsersAsync(take, skip, bearerToken, ct);
+
+    if (!result.Success)
+    {
+        await auditLogger.LogFailureAsync(
+            context.User,
+            AuditActions.UserListed,
+            "User",
+            errorMessage: result.ErrorMessage,
+            httpContext: context);
+
+        return Results.Json(
+            new { error = result.ErrorMessage ?? "AuthServer request failed." },
+            statusCode: (int)result.StatusCode);
+    }
+
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.UserListed,
+        "User",
+        details: new
+        {
+            take,
+            skip,
+            returned = result.Items.Count,
+            total = result.Total
+        },
+        httpContext: context);
+
+    return Results.Ok(new
+    {
+        users = result.Items,
+        pagination = new
+        {
+            total = result.Total,
+            skip,
+            take,
+            returned = result.Items.Count
+        }
+    });
+})
+.WithName("ListUsers")
+.RequireAuthorization("AdminOnly")
+.WithTags("Admin", "Users");
+
+// POST /users - Create user and assign roles
+app.MapPost("/users", async (
+    [FromBody] CreateUserRequest request,
+    HttpContext context,
+    AuthServerUserManagementService userService,
+    AuditLogger auditLogger,
+    CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Email))
+    {
+        return Results.BadRequest(new { error = "Email is required." });
+    }
+
+    if (string.IsNullOrWhiteSpace(request.TempPassword) ||
+        request.TempPassword.Length < MinTempPasswordLength)
+    {
+        return Results.BadRequest(new
+        {
+            error = $"tempPassword must be at least {MinTempPasswordLength} characters long."
+        });
+    }
+
+    if (!AdminUserRoleValidator.TryNormalizeRoles(request.Roles, out var normalizedRoles, out var roleError))
+    {
+        return Results.BadRequest(new { error = roleError });
+    }
+
+    if (normalizedRoles.Contains("admin") && !context.User.IsInRole("admin"))
+    {
+        await auditLogger.LogForbiddenAsync(
+            context.User,
+            AuditActions.UserCreated,
+            "User",
+            httpContext: context);
+
+        return Results.Problem(
+            statusCode: StatusCodes.Status403Forbidden,
+            title: "Insufficient permissions",
+            detail: "Only admins can assign the Admin role.");
+    }
+
+    var bearerToken = GetBearerToken(context);
+    var result = await userService.CreateUserAsync(request, normalizedRoles, bearerToken, ct);
+
+    if (!result.Success)
+    {
+        await auditLogger.LogFailureAsync(
+            context.User,
+            AuditActions.UserCreated,
+            "User",
+            errorMessage: result.ErrorMessage,
+            details: new { request.Email, Roles = normalizedRoles },
+            httpContext: context);
+
+        if (result.StatusCode == HttpStatusCode.Conflict)
+        {
+            return Results.Conflict(new { error = result.ErrorMessage ?? "User already exists." });
+        }
+
+        if (result.StatusCode == HttpStatusCode.BadRequest)
+        {
+            return Results.BadRequest(new { error = result.ErrorMessage ?? "Invalid user request." });
+        }
+
+        return Results.Json(
+            new { error = result.ErrorMessage ?? "AuthServer request failed." },
+            statusCode: (int)result.StatusCode);
+    }
+
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.UserCreated,
+        "User",
+        result.Data?.UserId,
+        details: new { request.Email, Roles = normalizedRoles },
+        httpContext: context);
+
+    return Results.Created($"/users/{result.Data?.UserId}", result.Data);
+})
+.WithName("CreateUser")
+.RequireAuthorization("AdminOnly")
+.WithTags("Admin", "Users");
+
+// PUT /users/{userId}/roles - Replace user roles
+app.MapPut("/users/{userId}/roles", async (
+    string userId,
+    [FromBody] UpdateUserRolesRequest request,
+    HttpContext context,
+    AuthServerUserManagementService userService,
+    AuditLogger auditLogger,
+    CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(userId))
+    {
+        return Results.BadRequest(new { error = "UserId is required." });
+    }
+
+    if (!AdminUserRoleValidator.TryNormalizeRoles(request.Roles, out var normalizedRoles, out var roleError))
+    {
+        return Results.BadRequest(new { error = roleError });
+    }
+
+    if (normalizedRoles.Contains("admin") && !context.User.IsInRole("admin"))
+    {
+        await auditLogger.LogForbiddenAsync(
+            context.User,
+            AuditActions.UserRolesUpdated,
+            "User",
+            userId,
+            httpContext: context);
+
+        return Results.Problem(
+            statusCode: StatusCodes.Status403Forbidden,
+            title: "Insufficient permissions",
+            detail: "Only admins can assign the Admin role.");
+    }
+
+    var bearerToken = GetBearerToken(context);
+    var result = await userService.UpdateRolesAsync(userId, normalizedRoles, bearerToken, ct);
+
+    if (!result.Success)
+    {
+        await auditLogger.LogFailureAsync(
+            context.User,
+            AuditActions.UserRolesUpdated,
+            "User",
+            userId,
+            errorMessage: result.ErrorMessage,
+            details: new { Roles = normalizedRoles },
+            httpContext: context);
+
+        if (result.StatusCode == HttpStatusCode.BadRequest)
+        {
+            return Results.BadRequest(new { error = result.ErrorMessage ?? "Invalid role request." });
+        }
+
+        return Results.Json(
+            new { error = result.ErrorMessage ?? "AuthServer request failed." },
+            statusCode: (int)result.StatusCode);
+    }
+
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.UserRolesUpdated,
+        "User",
+        userId,
+        details: new { Roles = normalizedRoles },
+        httpContext: context);
+
+    return Results.Ok(result.Data);
+})
+.WithName("UpdateUserRoles")
+.RequireAuthorization("AdminOnly")
+.WithTags("Admin", "Users");
+
+// PUT /users/{userId}/disable - Disable or enable a user
+app.MapPut("/users/{userId}/disable", async (
+    string userId,
+    [FromBody] UpdateUserDisabledRequest request,
+    HttpContext context,
+    AuditLogger auditLogger) =>
+{
+    await auditLogger.LogFailureAsync(
+        context.User,
+        AuditActions.UserDisabledUpdated,
+        "User",
+        userId,
+        errorMessage: "User disable feature is not implemented.",
+        details: new { request.IsDisabled },
+        httpContext: context);
+
+    return Results.Problem(
+        statusCode: StatusCodes.Status501NotImplemented,
+        title: "User disable not supported",
+        detail: "Soft disabling users is not currently implemented in the AdminAPI/AuthServer integration.");
+})
+.WithName("DisableUser")
+.RequireAuthorization("AdminOnly")
+.WithTags("Admin", "Users");
+
+// ===================================================================
+// END OF FILE
+// ===================================================================
