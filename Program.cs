@@ -3338,6 +3338,8 @@ app.MapPut("/users/{userId}/disable", async (
 .RequireAuthorization("AdminOnly")
 .WithTags("Admin", "Users");
 
+app.Run();
+
 // ===================================================================
 // END OF FILE
 // ===================================================================
