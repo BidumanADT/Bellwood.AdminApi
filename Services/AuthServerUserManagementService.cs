@@ -305,11 +305,12 @@ public sealed class AuthServerUserManagementService
         return new AdminUserDto
         {
             UserId = userId,
+            Username = user.Username ?? user.Email ?? "",
             Email = email,
             FirstName = user.FirstName,
             LastName = user.LastName,
-            Roles = AdminUserRoleValidator.ToDisplayRoles(user.Roles),
-            IsDisabled = user.IsDisabled,
+            Roles = user.Roles?.ToList() ?? new List<string>(),
+            IsDisabled = user.IsDisabled ?? false,
             CreatedAtUtc = user.CreatedAtUtc,
             ModifiedAtUtc = user.ModifiedAtUtc,
             CreatedByUserId = user.CreatedByUserId,

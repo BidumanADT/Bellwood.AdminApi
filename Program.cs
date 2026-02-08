@@ -3139,17 +3139,7 @@ app.MapGet("/users/list", async (
         },
         httpContext: context);
 
-    return Results.Ok(new
-    {
-        users = result.Items,
-        pagination = new
-        {
-            total = result.Total,
-            skip,
-            take,
-            returned = result.Items.Count
-        }
-    });
+    return Results.Ok(result.Items);
 })
 .WithName("ListUsers")
 .RequireAuthorization("AdminOnly")
