@@ -96,7 +96,7 @@ public class OAuthCredentialService
     /// Phase 3+: Get access token for LimoAnywhere API calls.
     /// TODO: Implement OAuth2 token exchange using stored credentials.
     /// </summary>
-    public async Task<string?> GetAccessTokenAsync(CancellationToken ct = default)
+    public Task<string?> GetAccessTokenAsync(CancellationToken ct = default)
     {
         // TODO: Phase 3 - Implement OAuth2 token exchange
         // 1. Get credentials from cache/repository
@@ -105,6 +105,6 @@ public class OAuthCredentialService
         // 4. Return access token for API calls
         
         _logger.LogWarning("GetAccessTokenAsync not yet implemented (Phase 3)");
-        return null;
+        return Task.FromResult<string?>(null);
     }
 }
