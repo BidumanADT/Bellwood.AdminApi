@@ -1,7 +1,7 @@
 # API Reference
 
 **Document Type**: Living Document - Technical Reference  
-**Last Updated**: January 14, 2026  
+**Last Updated**: February 8, 2026  
 **Status**: ? Production Ready
 
 ---
@@ -17,25 +17,6 @@ This document provides complete API endpoint documentation for the Bellwood Admi
 
 ---
 
-## ?? Authentication
-
-### Required Headers
-
-All endpoints (except `/health`) require authentication:
-
-```http
-Authorization: Bearer {jwt_token}
-```
-
-**Optional Headers**:
-
-```http
-X-Timezone-Id: America/Chicago    # Timezone for date conversions
-Content-Type: application/json     # For POST/PUT requests
-```
-
----
-
 ## ?? Endpoint Categories
 
 1. [Health Check](#health-check)
@@ -47,6 +28,7 @@ Content-Type: application/json     # For POST/PUT requests
 7. [Location Tracking](#location-tracking)
 8. [Passenger Endpoints](#passenger-endpoints)
 9. [Admin Endpoints](#admin-endpoints)
+10. [User Management (Admin)](#user-management-admin)
 
 ---
 
@@ -1584,6 +1566,6 @@ curl -X GET https://localhost:5206/driver/rides/today \
 
 ---
 
-**Last Updated**: January 14, 2026  
+**Last Updated**: February 8, 2026  
 **Status**: ? Production Ready  
 **API Version**: 2.0

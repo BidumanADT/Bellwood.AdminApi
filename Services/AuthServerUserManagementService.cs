@@ -108,6 +108,28 @@ public sealed class AuthServerUserManagementService
         return await SendAsync(httpRequest, MapToAdminUser, ct);
     }
 
+    public async Task<AuthServerResponse<AdminUserDto>> DisableUserAsync(
+        string userId,
+        string? bearerToken,
+        CancellationToken ct = default)
+    {
+        using var httpRequest = CreateRequest(HttpMethod.Put, $"/api/admin/users/{userId}/disable", bearerToken);
+        httpRequest.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+
+        return await SendAsync(httpRequest, MapToAdminUser, ct);
+    }
+
+    public async Task<AuthServerResponse<AdminUserDto>> EnableUserAsync(
+        string userId,
+        string? bearerToken,
+        CancellationToken ct = default)
+    {
+        using var httpRequest = CreateRequest(HttpMethod.Put, $"/api/admin/users/{userId}/enable", bearerToken);
+        httpRequest.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+
+        return await SendAsync(httpRequest, MapToAdminUser, ct);
+    }
+
     private HttpRequestMessage CreateRequest(HttpMethod method, string path, string? bearerToken)
     {
         var request = new HttpRequestMessage(method, new Uri(new Uri(_authServerBaseUrl), path));
@@ -283,11 +305,12 @@ public sealed class AuthServerUserManagementService
         return new AdminUserDto
         {
             UserId = userId,
+            Username = user.Username ?? user.Email ?? "",
             Email = email,
             FirstName = user.FirstName,
             LastName = user.LastName,
-            Roles = AdminUserRoleValidator.ToDisplayRoles(user.Roles),
-            IsDisabled = user.IsDisabled,
+            Roles = user.Roles?.ToList() ?? new List<string>(),
+            IsDisabled = user.IsDisabled ?? false,
             CreatedAtUtc = user.CreatedAtUtc,
             ModifiedAtUtc = user.ModifiedAtUtc,
             CreatedByUserId = user.CreatedByUserId,

@@ -1760,7 +1760,6 @@ app.MapGet("/driver/rides/today", async (HttpContext context, IBookingRepository
             return new DriverRideListItemDto
             {
                 Id = b.Id,
-                PickupDateTime = b.PickupDateTime, // Keep for backward compatibility
                 PickupDateTimeOffset = pickupOffset,
                 PickupLocation = b.PickupLocation,
                 DropoffLocation = b.DropoffLocation,
@@ -1813,7 +1812,6 @@ app.MapGet("/driver/rides/{id}", async (string id, HttpContext context, IBooking
     var detail = new DriverRideDetailDto
     {
         Id = booking.Id,
-        PickupDateTime = booking.PickupDateTime, // Keep for backward compatibility
         PickupDateTimeOffset = pickupOffset,
         PickupLocation = booking.PickupLocation,
         PickupStyle = booking.Draft.PickupStyle.ToString(),
@@ -3025,8 +3023,7 @@ app.MapPost("/api/admin/data-retention/cleanup", async (
         context.User,
         "DataRetention.ManualCleanup",
         "System",
-        details: new
-        {
+        details: new {
             auditLogsDeleted,
             bookingsAnonymized,
             quotesDeleted,
@@ -3142,17 +3139,7 @@ app.MapGet("/users/list", async (
         },
         httpContext: context);
 
-    return Results.Ok(new
-    {
-        users = result.Items,
-        pagination = new
-        {
-            total = result.Total,
-            skip,
-            take,
-            returned = result.Items.Count
-        }
-    });
+    return Results.Ok(result.Items);
 })
 .WithName("ListUsers")
 .RequireAuthorization("AdminOnly")
@@ -3318,21 +3305,57 @@ app.MapPut("/users/{userId}/disable", async (
     string userId,
     [FromBody] UpdateUserDisabledRequest request,
     HttpContext context,
-    AuditLogger auditLogger) =>
+    AuthServerUserManagementService userService,
+    AuditLogger auditLogger,
+    CancellationToken ct) =>
 {
-    await auditLogger.LogFailureAsync(
+    if (string.IsNullOrWhiteSpace(userId))
+    {
+        return Results.BadRequest(new { error = "UserId is required." });
+    }
+
+    var bearerToken = GetBearerToken(context);
+    
+    // Call appropriate AuthServer endpoint based on isDisabled flag
+    var result = request.IsDisabled
+        ? await userService.DisableUserAsync(userId, bearerToken, ct)
+        : await userService.EnableUserAsync(userId, bearerToken, ct);
+
+    if (!result.Success)
+    {
+        await auditLogger.LogFailureAsync(
+            context.User,
+            AuditActions.UserDisabledUpdated,
+            "User",
+            userId,
+            errorMessage: result.ErrorMessage,
+            details: new { request.IsDisabled },
+            httpContext: context);
+
+        if (result.StatusCode == HttpStatusCode.NotFound)
+        {
+            return Results.NotFound(new { error = result.ErrorMessage ?? "User not found." });
+        }
+
+        if (result.StatusCode == HttpStatusCode.BadRequest)
+        {
+            return Results.BadRequest(new { error = result.ErrorMessage ?? "Invalid disable request." });
+        }
+
+        return Results.Json(
+            new { error = result.ErrorMessage ?? "AuthServer request failed." },
+            statusCode: (int)result.StatusCode);
+    }
+
+    await auditLogger.LogSuccessAsync(
         context.User,
         AuditActions.UserDisabledUpdated,
         "User",
         userId,
-        errorMessage: "User disable feature is not implemented.",
-        details: new { request.IsDisabled },
+        details: new { IsDisabled = request.IsDisabled },
         httpContext: context);
 
-    return Results.Problem(
-        statusCode: StatusCodes.Status501NotImplemented,
-        title: "User disable not supported",
-        detail: "Soft disabling users is not currently implemented in the AdminAPI/AuthServer integration.");
+    return Results.Ok(result.Data);
 })
 .WithName("DisableUser")
 .RequireAuthorization("AdminOnly")
