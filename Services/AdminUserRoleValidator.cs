@@ -7,7 +7,7 @@ public static class AdminUserRoleValidator
     private static readonly IReadOnlyDictionary<string, string> RoleToNormalized =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["Passenger"] = "passenger",
+            ["Booker"] = "booker",      // FIXED: Changed from "Passenger" to "Booker"
             ["Driver"] = "driver",
             ["Dispatcher"] = "dispatcher",
             ["Admin"] = "admin"
