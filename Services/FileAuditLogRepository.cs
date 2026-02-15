@@ -191,6 +191,37 @@ public sealed class FileAuditLogRepository : IAuditLogRepository
         finally { _gate.Release(); }
     }
 
+    public async Task<AuditLogStats> GetStatsAsync(CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync();
+        
+        var logs = await ReadAllAsync();
+        
+        return new AuditLogStats
+        {
+            Count = logs.Count,
+            OldestUtc = logs.Any() ? logs.Min(l => l.Timestamp) : null,
+            NewestUtc = logs.Any() ? logs.Max(l => l.Timestamp) : null
+        };
+    }
+
+    public async Task<int> ClearAllAsync(CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync();
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var logs = await ReadAllAsync();
+            var count = logs.Count;
+            
+            // Clear by writing empty array
+            await WriteAllAsync(new List<AuditLog>());
+            
+            return count;
+        }
+        finally { _gate.Release(); }
+    }
+
     private async Task<List<AuditLog>> ReadAllAsync()
     {
         if (!File.Exists(_filePath))

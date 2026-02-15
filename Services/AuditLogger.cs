@@ -212,4 +212,8 @@ public static class AuditActions
     public const string UserListed = "User.Listed";
     public const string UserRolesUpdated = "User.Roles.Updated";
     public const string UserDisabledUpdated = "User.Disabled.Updated";
+
+    // Alpha: Audit log management actions
+    public const string AuditLogStatsViewed = "AuditLog.Stats.Viewed";
+    public const string AuditLogCleared = "AuditLog.Cleared";
 }
