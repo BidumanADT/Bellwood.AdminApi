@@ -29,6 +29,7 @@ This document provides complete API endpoint documentation for the Bellwood Admi
 8. [Passenger Endpoints](#passenger-endpoints)
 9. [Admin Endpoints](#admin-endpoints)
 10. [User Management (Admin)](#user-management-admin)
+11. [Audit Log Management (Admin)](#audit-log-management-admin)
 
 ---
 
@@ -1444,6 +1445,8 @@ Content-Type: application/json
 
 ---
 
+## User Management (Admin)
+
 ### PUT /api/admin/users/{username}/role
 
 **Description**: Update user role (proxy to AuthServer)
@@ -1493,6 +1496,238 @@ Content-Type: application/json
 
 ---
 
+## Audit Log Management (Admin)
+
+### GET /api/admin/audit-logs
+
+**Description**: Query audit logs with filtering and pagination
+
+**Auth**: `AdminOnly`
+
+**Query Parameters**:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `userId` | string | null | Filter by user ID |
+| `entityType` | string | null | Filter by entity type (e.g., "Quote", "Booking") |
+| `action` | string | null | Filter by action (e.g., "Quote.Created") |
+| `startDate` | DateTime | null | Filter logs after this date (UTC) |
+| `endDate` | DateTime | null | Filter logs before this date (UTC) |
+| `take` | integer | 100 | Number of logs to return (max 1000) |
+| `skip` | integer | 0 | Number of logs to skip (for pagination) |
+
+**Request**:
+```http
+GET /api/admin/audit-logs?userId=user-123&entityType=Quote&take=50&skip=0 HTTP/1.1
+Host: localhost:5206
+Authorization: Bearer {adminToken}
+```
+
+**Response** (200 OK):
+```json
+{
+  "logs": [
+    {
+      "id": "audit-abc123",
+      "timestamp": "2026-02-08T14:30:00Z",
+      "userId": "user-123",
+      "username": "alice",
+      "action": "Quote.Created",
+      "entityType": "Quote",
+      "entityId": "quote-xyz",
+      "result": "Success",
+      "ipAddress": "192.168.1.100",
+      "endpoint": "POST /quotes",
+      "details": "{\"passengerName\":\"John Doe\",\"vehicleClass\":\"Sedan\"}",
+      "errorMessage": null
+    }
+  ],
+  "pagination": {
+    "total": 150,
+    "skip": 0,
+    "take": 50,
+    "returned": 50
+  },
+  "filters": {
+    "userId": "user-123",
+    "entityType": "Quote",
+    "action": null,
+    "startDate": null,
+    "endDate": null
+  }
+}
+```
+
+---
+
+### GET /api/admin/audit-logs/{id}
+
+**Description**: Get a specific audit log entry by ID
+
+**Auth**: `AdminOnly`
+
+**Request**:
+```http
+GET /api/admin/audit-logs/audit-abc123 HTTP/1.1
+Host: localhost:5206
+Authorization: Bearer {adminToken}
+```
+
+**Response** (200 OK):
+```json
+{
+  "id": "audit-abc123",
+  "timestamp": "2026-02-08T14:30:00Z",
+  "userId": "user-123",
+  "username": "alice",
+  "action": "Quote.Created",
+  "entityType": "Quote",
+  "entityId": "quote-xyz",
+  "result": "Success",
+  "ipAddress": "192.168.1.100",
+  "endpoint": "POST /quotes",
+  "details": "{\"passengerName\":\"John Doe\",\"vehicleClass\":\"Sedan\"}",
+  "errorMessage": null
+}
+```
+
+**Side Effects**:
+- Audit log created for viewing the audit log (meta-auditing)
+
+**Error Responses**:
+- **404 Not Found**: Audit log doesn't exist
+
+---
+
+### GET /api/admin/audit-logs/stats
+
+**Description**: Get audit log statistics (count, oldest, newest)
+
+**Auth**: `AdminOnly`
+
+**Request**:
+```http
+GET /api/admin/audit-logs/stats HTTP/1.1
+Host: localhost:5206
+Authorization: Bearer {adminToken}
+```
+
+**Response** (200 OK):
+```json
+{
+  "count": 1543,
+  "oldestUtc": "2025-12-01T00:00:00Z",
+  "newestUtc": "2026-02-08T15:30:00Z"
+}
+```
+
+**Side Effects**:
+- Audit log created for viewing stats
+
+---
+
+### DELETE /api/admin/audit-logs/cleanup
+
+**Description**: Delete audit logs older than specified retention period
+
+**Auth**: `AdminOnly`
+
+**Query Parameters**:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `retentionDays` | integer | 90 | Number of days to retain (1-365) |
+
+**Request**:
+```http
+DELETE /api/admin/audit-logs/cleanup?retentionDays=90 HTTP/1.1
+Host: localhost:5206
+Authorization: Bearer {adminToken}
+```
+
+**Response** (200 OK):
+```json
+{
+  "message": "Audit log cleanup completed",
+  "deletedCount": 324,
+  "retentionDays": 90,
+  "cutoffDate": "2025-11-10T15:30:00Z"
+}
+```
+
+**Side Effects**:
+- Audit logs older than cutoff date are permanently deleted
+- System audit log created for cleanup action
+
+**Validation**:
+- `retentionDays` must be between 1 and 365
+- Defaults to 90 days if invalid
+
+---
+
+### POST /api/admin/audit-logs/clear
+
+**Description**: Clear all audit logs (requires safety confirmation)
+
+**Auth**: `AdminOnly`
+
+**?? WARNING**: This is a destructive operation that deletes ALL audit logs!
+
+**Request**:
+```http
+POST /api/admin/audit-logs/clear HTTP/1.1
+Host: localhost:5206
+Authorization: Bearer {adminToken}
+Content-Type: application/json
+
+{
+  "confirm": "CLEAR"
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "deletedCount": 1543,
+  "clearedAtUtc": "2026-02-08T15:30:00Z",
+  "clearedByUserId": "user-admin-123",
+  "clearedByUsername": "alice",
+  "message": "All audit logs have been cleared successfully"
+}
+```
+
+**Safety Confirmation**:
+- Request body **must** contain exactly `{"confirm": "CLEAR"}` (case-sensitive)
+- Any other value will be rejected with 400 Bad Request
+
+**Side Effects**:
+- **ALL audit logs permanently deleted**
+- One final audit log created AFTER clearing (recording the clear operation)
+- Warning logged to application logs
+
+**Error Responses**:
+- **400 Bad Request**: Invalid or missing confirmation phrase
+
+**Example Error Response**:
+```json
+{
+  "error": "Confirmation phrase must be exactly 'CLEAR' (case-sensitive)"
+}
+```
+
+**Use Cases**:
+- Development/testing cleanup
+- Compliance requirement to purge old data
+- Starting fresh after testing
+
+**Production Recommendations**:
+1. **Export** logs before clearing (future feature)
+2. **Backup** `App_Data/audit-logs.json` before clearing
+3. **Document** reason for clearing in change log
+4. **Notify** stakeholders before production clear
+
+---
+
 ## ?? HTTP Status Codes
 
 | Code | Meaning | Common Causes |
@@ -1522,32 +1757,41 @@ Content-Type: application/json
 
 ## ?? Testing with cURL
 
-### Get JWT Token (AuthServer)
+### Audit Log Management Examples
 
 ```bash
 # Get admin token
-curl -X POST https://localhost:5001/api/auth/login \
+TOKEN=$(curl -s -X POST https://localhost:5001/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username": "alice", "password": "password"}' \
-  | jq -r '.accessToken'
+  | jq -r '.accessToken')
 
-# Get driver token
-curl -X POST https://localhost:5001/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username": "charlie", "password": "password"}' \
-  | jq -r '.accessToken'
-```
-
-### Use Token in Requests
-
-```bash
-# Store token
-TOKEN="eyJhbGciOiJIUzI1NiIs..."
-
-# Make authenticated request
-curl -X GET https://localhost:5206/driver/rides/today \
+# Query audit logs
+curl -X GET "https://localhost:5206/api/admin/audit-logs?entityType=Quote&take=20" \
   -H "Authorization: Bearer $TOKEN" \
-  -H "X-Timezone-Id: America/Chicago"
+  | jq
+
+# Get specific audit log
+curl -X GET "https://localhost:5206/api/admin/audit-logs/audit-abc123" \
+  -H "Authorization: Bearer $TOKEN" \
+  | jq
+
+# Get audit log statistics
+curl -X GET "https://localhost:5206/api/admin/audit-logs/stats" \
+  -H "Authorization: Bearer $TOKEN" \
+  | jq
+
+# Clean up old logs (90 day retention)
+curl -X DELETE "https://localhost:5206/api/admin/audit-logs/cleanup?retentionDays=90" \
+  -H "Authorization: Bearer $TOKEN" \
+  | jq
+
+# Clear all logs (DANGER!)
+curl -X POST "https://localhost:5206/api/admin/audit-logs/clear" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"confirm": "CLEAR"}' \
+  | jq
 ```
 
 ---
