@@ -572,6 +572,24 @@ try {
     Test-DataRetention
     Test-Authorization
     
+    # Step 3.1: Run audit log management tests (alpha feature)
+    Write-TestHeader "AUDIT LOG MANAGEMENT (ALPHA)"
+    try {
+        $auditTestPath = Join-Path $PSScriptRoot "Test-AuditLogManagement.ps1"
+        if (Test-Path $auditTestPath) {
+            Write-Host "Running audit log management tests..." -ForegroundColor Cyan
+            & $auditTestPath -AdminApiUrl $AdminApiUrl -AuthServerUrl $AuthServerUrl `
+                -AdminUsername $AdminUsername -AdminPassword $AdminPassword
+            Write-TestResult -TestName "Audit Log Management Tests" -Passed ($LASTEXITCODE -eq 0) `
+                -Message "See test output above for details"
+        } else {
+            Write-Host "? Audit log management test script not found: $auditTestPath" -ForegroundColor Yellow
+            Write-TestResult -TestName "Audit Log Management Tests" -Passed $false -Message "Script not found"
+        }
+    } catch {
+        Write-TestResult -TestName "Audit Log Management Tests" -Passed $false -Message $_.Exception.Message
+    }
+    
     # Step 4: Generate report
     Show-TestReport
     

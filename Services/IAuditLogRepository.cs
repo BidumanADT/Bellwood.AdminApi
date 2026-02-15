@@ -59,4 +59,27 @@ public interface IAuditLogRepository
     /// <param name="ct">Cancellation token</param>
     /// <returns>Number of logs deleted</returns>
     Task<int> DeleteOldLogsAsync(int retentionDays = 90, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get audit log statistics.
+    /// Alpha: Returns count and oldest/newest timestamps.
+    /// </summary>
+    Task<AuditLogStats> GetStatsAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Clear all audit logs (DANGEROUS - requires confirmation).
+    /// Alpha: Used for testing/demo purposes only.
+    /// Production: Should be heavily restricted or removed.
+    /// </summary>
+    Task<int> ClearAllAsync(CancellationToken ct = default);
+}
+
+/// <summary>
+/// Audit log statistics.
+/// </summary>
+public sealed class AuditLogStats
+{
+    public int Count { get; set; }
+    public DateTime? OldestUtc { get; set; }
+    public DateTime? NewestUtc { get; set; }
 }

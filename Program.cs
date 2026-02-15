@@ -1646,7 +1646,6 @@ app.MapPost("/bookings/{id}/cancel", async (
 .WithName("CancelBooking")
 .RequireAuthorization();
 
-
 // ===================================================================
 // DRIVER ENDPOINTS
 // ===================================================================
@@ -2932,25 +2931,70 @@ app.MapGet("/api/admin/audit-logs", async (
     });
 })
 .WithName("GetAuditLogs")
-.RequireAuthorization("AdminOnly") // Phase 3: Only admins can view audit logs
+.RequireAuthorization("AdminOnly")
 .WithTags("Admin", "Audit");
-
 
 // GET /api/admin/audit-logs/{id} - Get specific audit log by ID
 app.MapGet("/api/admin/audit-logs/{id}", async (
     string id,
-    IAuditLogRepository auditRepo) =>
+    HttpContext context,
+    IAuditLogRepository auditRepo,
+    AuditLogger auditLogger) =>
 {
     var log = await auditRepo.GetByIdAsync(id);
     
     if (log is null)
+    {
         return Results.NotFound(new { error = "Audit log not found" });
+    }
+
+    // Audit the individual log view (sensitive operation)
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        "AuditLog.Viewed",
+        "AuditLog",
+        id,
+        httpContext: context);
 
     return Results.Ok(log);
 })
 .WithName("GetAuditLogById")
 .RequireAuthorization("AdminOnly")
 .WithTags("Admin", "Audit");
+
+// GET /api/admin/audit-logs/stats - Get audit log statistics
+app.MapGet("/api/admin/audit-logs/stats", async (
+    HttpContext context,
+    IAuditLogRepository auditRepo,
+    AuditLogger auditLogger,
+    CancellationToken ct) =>
+{
+    var stats = await auditRepo.GetStatsAsync(ct);
+
+    // Audit the stats view
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.AuditLogStatsViewed,
+        "AuditLog",
+        details: new
+        {
+            count = stats.Count,
+            oldestUtc = stats.OldestUtc,
+            newestUtc = stats.NewestUtc
+        },
+        httpContext: context);
+
+    return Results.Ok(new
+    {
+        count = stats.Count,
+        oldestUtc = stats.OldestUtc,
+        newestUtc = stats.NewestUtc
+    });
+})
+.WithName("GetAuditLogStats")
+.RequireAuthorization("AdminOnly")
+.WithTags("Admin", "Audit");
+
 
 // DELETE /api/admin/audit-logs/cleanup - Clean up old audit logs
 app.MapDelete("/api/admin/audit-logs/cleanup", async (
@@ -2979,6 +3023,72 @@ app.MapDelete("/api/admin/audit-logs/cleanup", async (
     });
 })
 .WithName("CleanupAuditLogs")
+.RequireAuthorization("AdminOnly")
+.WithTags("Admin", "Audit");
+
+// POST /api/admin/audit-logs/clear - Clear all audit logs (requires confirmation)
+app.MapPost("/api/admin/audit-logs/clear", async (
+    [FromBody] ClearAuditLogsRequest request,
+    HttpContext context,
+    IAuditLogRepository auditRepo,
+    AuditLogger auditLogger,
+    ILoggerFactory loggerFactory,
+    CancellationToken ct) =>
+{
+    var log = loggerFactory.CreateLogger("audit");
+    var currentUserId = GetUserId(context.User);
+    var username = context.User.FindFirst("sub")?.Value ?? "unknown";
+
+    // Safety check: require exact confirmation phrase
+    if (request.Confirm != "CLEAR")
+    {
+        await auditLogger.LogFailureAsync(
+            context.User,
+            AuditActions.AuditLogCleared,
+            "AuditLog",
+            errorMessage: "Invalid confirmation phrase",
+            details: new {
+                providedConfirm = request.Confirm,
+                expectedConfirm = "CLEAR"
+            },
+            httpContext: context);
+
+        return Results.BadRequest(new
+        {
+            error = "Confirmation phrase must be exactly 'CLEAR' (case-sensitive)"
+        });
+    }
+
+    // Clear all audit logs
+    var deletedCount = await auditRepo.ClearAllAsync(ct);
+    var clearedAtUtc = DateTime.UtcNow;
+
+    log.LogWarning("Audit logs cleared by {Username} ({UserId}). Deleted count: {DeletedCount}",
+        username, currentUserId, deletedCount);
+
+    // Record one final audit event AFTER clearing
+    await auditLogger.LogSuccessAsync(
+        context.User,
+        AuditActions.AuditLogCleared,
+        "AuditLog",
+        details: new {
+            deletedCount,
+            clearedAtUtc,
+            clearedByUserId = currentUserId,
+            clearedByUsername = username
+        },
+        httpContext: context);
+
+    return Results.Ok(new
+    {
+        deletedCount,
+        clearedAtUtc,
+        clearedByUserId = currentUserId,
+        clearedByUsername = username,
+        message = "All audit logs have been cleared successfully"
+    });
+})
+.WithName("ClearAuditLogs")
 .RequireAuthorization("AdminOnly")
 .WithTags("Admin", "Audit");
 
@@ -3090,7 +3200,7 @@ app.MapPost("/api/admin/data-protection/test", (
 .WithTags("Admin", "DataProtection");
 
 // ===================================================================
-// ADMIN PORTAL USER MANAGEMENT ENDPOINTS (Admin-Only)
+// PHASE 3C: ADMIN PORTAL USER MANAGEMENT ENDPOINTS (Admin-Only)
 // ===================================================================
 
 const int MinTempPasswordLength = 10;
@@ -3362,6 +3472,17 @@ app.MapPut("/users/{userId}/disable", async (
 .WithTags("Admin", "Users");
 
 app.Run();
+
+// ===================================================================
+// REQUEST/RESPONSE DTOs
+// ===================================================================
+
+/// <summary>
+/// Request DTO for clearing all audit logs.
+/// Alpha: Requires confirmation phrase for safety.
+/// </summary>
+/// <param name="Confirm">Must be exactly "CLEAR" (case-sensitive)</param>
+public record ClearAuditLogsRequest(string Confirm);
 
 // ===================================================================
 // END OF FILE

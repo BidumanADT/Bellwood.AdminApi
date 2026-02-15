@@ -198,6 +198,12 @@ builder.Services.AddAuthorization(options =>
 | **OAuth Management** |
 | `GET /api/admin/oauth` | `AdminOnly` | Secret masked | admin |
 | `PUT /api/admin/oauth` | `AdminOnly` | Audit trail | admin |
+| **Audit Log Management** |
+| `GET /api/admin/audit-logs` | `AdminOnly` | - | admin |
+| `GET /api/admin/audit-logs/{id}` | `AdminOnly` | Meta-audit | admin |
+| `GET /api/admin/audit-logs/stats` | `AdminOnly` | Meta-audit | admin |
+| `DELETE /api/admin/audit-logs/cleanup` | `AdminOnly` | System audit | admin |
+| `POST /api/admin/audit-logs/clear` | `AdminOnly` | Safety confirmation | admin |
 
 ---
 
@@ -617,9 +623,54 @@ credentials.LastUpdatedBy = context.User.FindFirst("sub")?.Value ?? "unknown";
 credentials.LastUpdatedUtc = DateTime.UtcNow;
 ```
 
+**Audit Log Clearing (Safety)**:
+```csharp
+// Requires exact confirmation phrase "CLEAR" (case-sensitive)
+if (request.Confirm != "CLEAR")
+{
+    await auditLogger.LogFailureAsync(
+        context.User,
+        AuditActions.AuditLogCleared,
+        "AuditLog",
+        errorMessage: "Invalid confirmation phrase",
+        httpContext: context);
+    
+    return Results.BadRequest(new { error = "Confirmation phrase must be exactly 'CLEAR'" });
+}
+
+// Clear all logs
+var deletedCount = await auditRepo.ClearAllAsync(ct);
+
+// Record one final audit event AFTER clearing
+await auditLogger.LogSuccessAsync(
+    context.User,
+    AuditActions.AuditLogCleared,
+    "AuditLog",
+    details: new {
+        deletedCount,
+        clearedAtUtc = DateTime.UtcNow,
+        clearedByUserId = currentUserId,
+        clearedByUsername = username
+    },
+    httpContext: context);
+```
+
+**Meta-Auditing**:
+```csharp
+// Audit the act of viewing audit logs
+await auditLogger.LogSuccessAsync(
+    context.User,
+    "AuditLog.Viewed",
+    "AuditLog",
+    id,
+    httpContext: context);
+```
+
 **Logging**:
 ```csharp
 log.LogInformation("OAuth credentials updated by admin {AdminUsername}", adminUsername);
+log.LogWarning("Audit logs cleared by {Username} ({UserId}). Deleted count: {DeletedCount}",
+    username, currentUserId, deletedCount);
 log.LogWarning("User {UserId} attempted to cancel booking {BookingId} they don't own", 
     currentUserId, id);
 ```
