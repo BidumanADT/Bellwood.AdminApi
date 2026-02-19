@@ -2,13 +2,34 @@
 {
     public sealed class EmailOptions
     {
-        public string Host { get; set; } = "localhost";
-        public int Port { get; set; } = 25;
+        public string Mode { get; set; } = "Disabled";
+        public EmailSmtpOptions Smtp { get; set; } = new();
+        public EmailOverrideRecipientsOptions OverrideRecipients { get; set; } = new();
+        public bool IncludeOriginalRecipientInSubject { get; set; } = false;
+
+        // Backward-compatible accessors for existing sender behavior.
+        public string Host => Smtp.Host;
+        public int Port => Smtp.Port;
+        public string? Username => Smtp.Username;
+        public string? Password => Smtp.Password;
+        public string From => Smtp.From;
         public bool UseStartTls { get; set; } = false;
-        public string? Username { get; set; }
-        public string? Password { get; set; }
-        public string From { get; set; } = "no-reply@bellwoodelite.dev";
         public string To { get; set; } = "reservations+quotes@bellwoodelite.dev";
-        public string SubjectPrefix { get; set; } = "[Quote] ";
+        public string SubjectPrefix { get; set; } = "[Quote]";
+    }
+
+    public sealed class EmailSmtpOptions
+    {
+        public string Host { get; set; } = string.Empty;
+        public int Port { get; set; } = 25;
+        public string Username { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+        public string From { get; set; } = string.Empty;
+    }
+
+    public sealed class EmailOverrideRecipientsOptions
+    {
+        public bool Enabled { get; set; } = false;
+        public string Address { get; set; } = string.Empty;
     }
 }
