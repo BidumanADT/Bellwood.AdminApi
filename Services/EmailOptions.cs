@@ -17,7 +17,9 @@
         public string? Username => Smtp.Username;
         public string? Password => Smtp.Password;
         public string From => Smtp.From;
-        public bool UseStartTls { get; set; } = false;
+        // public bool UseStartTls { get; set; } = false;
+        public bool UseStartTls => Smtp.UseStartTls;
+
         public string To { get; set; } = "reservations+quotes@bellwoodelite.dev";
         public string SubjectPrefix { get; set; } = "[Quote]";
     }
@@ -29,6 +31,8 @@
         public string Username { get; set; } = string.Empty;
         public string Password { get; set; } = string.Empty;
         public string From { get; set; } = string.Empty;
+        public bool UseStartTls { get; set; } = false;
+
     }
 
     public sealed class EmailOverrideRecipientsOptions

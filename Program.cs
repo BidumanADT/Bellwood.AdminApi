@@ -19,6 +19,11 @@ using System.Text.Json;
 using static Bellwood.AdminApi.Services.UserAuthorizationHelper;
 
 var builder = WebApplication.CreateBuilder(args);
+// Load user-secrets in Development AND Alpha (local test environments)
+if (builder.Environment.IsDevelopment() || builder.Environment.EnvironmentName.Equals("Alpha", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Configuration.AddUserSecrets<Program>(optional: true);
+}
 
 // ===================================================================
 // SERVICE REGISTRATION
