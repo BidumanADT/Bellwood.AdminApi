@@ -422,6 +422,11 @@ Bellwood Elite Team"
 
                     try
                     {
+                        // Reserve the slot before opening the connection so the next
+                        // queued sender waits ThrottleMs from NOW, not from after we finish.
+                        if (_opt.IsAlphaSandbox)
+                            _nextAllowedUtc = DateTime.UtcNow.AddMilliseconds(_opt.Smtp.ThrottleMs);
+
                         using var smtp = new SmtpClient();
                         await smtp.ConnectAsync(_opt.Host, _opt.Port,
                             _opt.UseStartTls ? SecureSocketOptions.StartTls : SecureSocketOptions.Auto);
@@ -431,10 +436,6 @@ Bellwood Elite Team"
 
                         await smtp.SendAsync(msg);
                         await smtp.DisconnectAsync(true);
-
-                        // Update the gate timestamp after a successful send.
-                        if (_opt.IsAlphaSandbox)
-                            _nextAllowedUtc = DateTime.UtcNow.AddMilliseconds(1100);
 
                         return; // success — exit retry loop
                     }
@@ -451,7 +452,7 @@ Bellwood Elite Team"
 
                         // Push the gate forward so the next attempt respects spacing too.
                         if (_opt.IsAlphaSandbox)
-                            _nextAllowedUtc = DateTime.UtcNow.AddMilliseconds(delay);
+                            _nextAllowedUtc = DateTime.UtcNow.AddMilliseconds(Math.Max(delay, _opt.Smtp.ThrottleMs));
                     }
                     // All other exceptions propagate normally.
                 }

@@ -32,7 +32,8 @@
         public string Password { get; set; } = string.Empty;
         public string From { get; set; } = string.Empty;
         public bool UseStartTls { get; set; } = false;
-
+        // Minimum ms between sends in AlphaSandbox; tune via appsettings without a code change.
+        public int ThrottleMs { get; set; } = 2000;
     }
 
     public sealed class EmailOverrideRecipientsOptions
