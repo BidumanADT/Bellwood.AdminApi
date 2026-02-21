@@ -35,17 +35,19 @@ namespace Bellwood.AdminApi.Services
         /// Resolve and validate the From address from config.
         /// Returns null (and logs an error) if the address is missing or invalid.
         /// </summary>
-        private MailboxAddress? ResolveFrom()
+        private MailboxAddress? ResolveFrom(string eventType, string? referenceId)
         {
             var raw = _opt.Smtp.From?.Trim();
             if (string.IsNullOrWhiteSpace(raw))
             {
-                _logger.LogError("[Email] Email skipped: missing From address. Set Email:Smtp:From in user-secrets or appsettings.");
+                _logger.LogError("[Email] {EventType} {ReferenceId} skipped: missing From address. Set Email:Smtp:From in user-secrets or appsettings.",
+                    eventType, referenceId ?? "(no ref)");
                 return null;
             }
             if (!MailboxAddress.TryParse(ParserOptions.Default, raw, out var mailbox))
             {
-                _logger.LogError("[Email] Email skipped: '{Address}' is not a valid From email address.", raw);
+                _logger.LogError("[Email] {EventType} {ReferenceId} skipped: '{Address}' is not a valid From email address.",
+                    eventType, referenceId ?? "(no ref)", raw);
                 return null;
             }
             return mailbox;
@@ -58,7 +60,7 @@ namespace Bellwood.AdminApi.Services
         /// If OverrideRecipients.Enabled, the override address is used instead.
         /// Returns null (and logs an error) if the resolved address is missing or invalid.
         /// </summary>
-        private MailboxAddress? ResolveTo(string? intendedAddress = null)
+        private MailboxAddress? ResolveTo(string eventType, string? referenceId, string? intendedAddress = null)
         {
             string? raw;
             if (_opt.OverrideRecipients.Enabled)
@@ -72,12 +74,14 @@ namespace Bellwood.AdminApi.Services
 
             if (string.IsNullOrWhiteSpace(raw))
             {
-                _logger.LogError("[Email] Email skipped: missing To address. Check Email:To or Email:OverrideRecipients:Address in config.");
+                _logger.LogError("[Email] {EventType} {ReferenceId} skipped: missing To address. Check Email:To or Email:OverrideRecipients:Address in config.",
+                    eventType, referenceId ?? "(no ref)");
                 return null;
             }
             if (!MailboxAddress.TryParse(ParserOptions.Default, raw, out var mailbox))
             {
-                _logger.LogError("[Email] Email skipped: '{Address}' is not a valid To email address.", raw);
+                _logger.LogError("[Email] {EventType} {ReferenceId} skipped: '{Address}' is not a valid To email address.",
+                    eventType, referenceId ?? "(no ref)", raw);
                 return null;
             }
             return mailbox;
@@ -87,10 +91,10 @@ namespace Bellwood.AdminApi.Services
         /// Build a MimeMessage with resolved From/To addresses.
         /// Returns null if either address cannot be resolved (error already logged).
         /// </summary>
-        private MimeMessage? BuildMessage(string? intendedTo = null)
+        private MimeMessage? BuildMessage(string eventType, string? referenceId, string? intendedTo = null)
         {
-            var from = ResolveFrom();
-            var to = ResolveTo(intendedTo);
+            var from = ResolveFrom(eventType, referenceId);
+            var to = ResolveTo(eventType, referenceId, intendedTo);
             if (from is null || to is null)
                 return null;
 
@@ -100,8 +104,8 @@ namespace Bellwood.AdminApi.Services
 
             if (_opt.IsAlphaSandbox)
             {
-                _logger.LogInformation("[Email/AlphaSandbox] From={From} To={To} (override={Override})",
-                    from.Address, to.Address, _opt.OverrideRecipients.Enabled);
+                _logger.LogInformation("[Email/AlphaSandbox] {EventType} {ReferenceId} From={From} To={To} (override={Override})",
+                    eventType, referenceId ?? "(no ref)", from.Address, to.Address, _opt.OverrideRecipients.Enabled);
             }
 
             return msg;
@@ -127,7 +131,7 @@ namespace Bellwood.AdminApi.Services
 
         public async Task SendQuoteAsync(QuoteDraft draft, string referenceId)
         {
-            var msg = BuildMessage();
+            var msg = BuildMessage("Quote.Submitted", referenceId);
             if (msg is null) return;
 
             msg.Subject = BuildSubject(
@@ -146,7 +150,7 @@ namespace Bellwood.AdminApi.Services
 
         public async Task SendBookingAsync(QuoteDraft draft, string referenceId)
         {
-            var msg = BuildMessage();
+            var msg = BuildMessage("Booking.Submitted", referenceId);
             if (msg is null) return;
 
             msg.Subject = BuildSubject(
@@ -165,7 +169,7 @@ namespace Bellwood.AdminApi.Services
 
         public async Task SendBookingCancellationAsync(QuoteDraft draft, string referenceId, string bookerName)
         {
-            var msg = BuildMessage();
+            var msg = BuildMessage("Booking.Cancelled", referenceId);
             if (msg is null) return;
 
             msg.Subject = BuildSubject(
@@ -184,7 +188,7 @@ namespace Bellwood.AdminApi.Services
 
         public async Task SendDriverAssignmentAsync(BookingRecord booking, Driver driver, Affiliate affiliate)
         {
-            var msg = BuildMessage(affiliate.Email);
+            var msg = BuildMessage("Booking.DriverAssigned", booking.Id, affiliate.Email);
             if (msg is null) return;
 
             msg.Subject = BuildSubject(
@@ -412,7 +416,7 @@ Bellwood Elite Team"
         public async Task SendQuoteResponseAsync(QuoteRecord quote)
         {
             var intendedTo = quote.Draft?.Booker?.EmailAddress;
-            var msg = BuildMessage(intendedTo ?? _opt.To);
+            var msg = BuildMessage("Quote.Responded", quote.Id, intendedTo ?? _opt.To);
             if (msg is null) return;
 
             msg.Subject = BuildSubject(
@@ -491,7 +495,7 @@ Bellwood Elite Team"
 
     public async Task SendQuoteAcceptedAsync(QuoteRecord quote, string bookingId)
     {
-        var msg = BuildMessage();
+        var msg = BuildMessage("Quote.Accepted", quote.Id);
         if (msg is null) return;
 
         msg.Subject = BuildSubject(

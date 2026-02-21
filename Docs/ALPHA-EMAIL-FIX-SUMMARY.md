@@ -38,23 +38,24 @@ No other changes. All binding keys remain unchanged.
 public SmtpEmailSender(IOptions<EmailOptions> opt, ILogger<SmtpEmailSender> logger)
 ```
 
-#### `ResolveFrom()` — private address helper
+#### `ResolveFrom(eventType, referenceId)` — private address helper
 
 - Reads `_opt.Smtp.From` (bound from `Email:Smtp:From`)
 - Trims whitespace
 - Validates with `MailboxAddress.TryParse(ParserOptions.Default, raw, out var mailbox)`
-- On blank or invalid: logs `LogError` with actionable message, returns `null`
+- On blank or invalid: logs `LogError` including `eventType` and `referenceId` for correlation, returns `null`
 
-#### `ResolveTo(intendedAddress?)` — private address helper
+#### `ResolveTo(eventType, referenceId, intendedAddress?)` — private address helper
 
 - If `OverrideRecipients.Enabled` ? uses `Email:OverrideRecipients:Address` (sandbox intercept)
 - Otherwise ? uses `intendedAddress ?? _opt.To`
-- Same `TryParse` validation and null-on-failure behaviour
+- Same `TryParse` validation and null-on-failure behaviour, with `eventType` and `referenceId` in error log
 
-#### `BuildMessage(intendedTo?)` — central message factory
+#### `BuildMessage(eventType, referenceId, intendedTo?)` — central message factory
 
-- Calls both helpers; returns `null` if either address is unresolvable (error already logged)
-- When `IsAlphaSandbox`: logs `LogInformation` showing resolved From/To and override state
+- Calls both helpers, passing `eventType` and `referenceId` through for log correlation
+- Returns `null` if either address is unresolvable (error already logged)
+- When `IsAlphaSandbox`: logs `LogInformation` showing event type, reference ID, resolved From/To, and override state
 - Only place that touches `msg.From` / `msg.To` — `MailboxAddress.Parse()` is never called directly anywhere in the sender
 
 #### `BuildSubject(baseSubject, originalRecipient?)` — subject helper
@@ -63,16 +64,16 @@ public SmtpEmailSender(IOptions<EmailOptions> opt, ILogger<SmtpEmailSender> logg
 
 #### All six public `SendXxxAsync` methods updated
 
-Each method now calls `BuildMessage(intendedTo?)`, checks `if (msg is null) return;`, and uses `BuildSubject(...)`.
+Each method now calls `BuildMessage(eventType, referenceId, intendedTo?)`, checks `if (msg is null) return;`, and uses `BuildSubject(...)`.
 
-| Method | `intendedTo` passed |
-|---|---|
-| `SendQuoteAsync` | none — staff inbox |
-| `SendBookingAsync` | none — staff inbox |
-| `SendBookingCancellationAsync` | none — staff inbox |
-| `SendDriverAssignmentAsync` | `affiliate.Email` |
-| `SendQuoteResponseAsync` | `quote.Draft?.Booker?.EmailAddress` |
-| `SendQuoteAcceptedAsync` | none — staff inbox |
+| Method | `eventType` | `referenceId` | `intendedTo` passed |
+|---|---|---|---|
+| `SendQuoteAsync` | `Quote.Submitted` | quote ID | none — staff inbox |
+| `SendBookingAsync` | `Booking.Submitted` | booking ID | none — staff inbox |
+| `SendBookingCancellationAsync` | `Booking.Cancelled` | booking ID | none — staff inbox |
+| `SendDriverAssignmentAsync` | `Booking.DriverAssigned` | booking ID | `affiliate.Email` |
+| `SendQuoteResponseAsync` | `Quote.Responded` | quote ID | `quote.Draft?.Booker?.EmailAddress` |
+| `SendQuoteAcceptedAsync` | `Quote.Accepted` | quote ID | none — staff inbox |
 
 #### `SendEmailAsync` — early-exit guards added
 
@@ -197,12 +198,12 @@ In all cases: **no exception, no crash, seed-all completes**.
 
 ... (seed-all runs) ...
 
-info: [Email/AlphaSandbox] From=alpha@bellwood.com To=central-inbox@bellwood-alpha.test (override=True)
-info: [Email/AlphaSandbox] From=alpha@bellwood.com To=central-inbox@bellwood-alpha.test (override=True)
-info: [Email/AlphaSandbox] From=alpha@bellwood.com To=central-inbox@bellwood-alpha.test (override=True)
+info: [Email/AlphaSandbox] Quote.Submitted abc123 From=alpha@bellwood.com To=central-inbox@bellwood-alpha.test (override=True)
+info: [Email/AlphaSandbox] Booking.Submitted def456 From=alpha@bellwood.com To=central-inbox@bellwood-alpha.test (override=True)
+info: [Email/AlphaSandbox] Booking.DriverAssigned def456 From=alpha@bellwood.com To=central-inbox@bellwood-alpha.test (override=True)
 ```
 
-All emails are intercepted to the single override inbox regardless of the original intended recipient.
+All emails are intercepted to the single override inbox. Each log line identifies the event type and reference ID for immediate correlation.
 
 ---
 
@@ -213,8 +214,8 @@ All emails are intercepted to the single override inbox regardless of the origin
 
 ... (seed-all runs) ...
 
-fail: [Email] Email skipped: missing From address. Set Email:Smtp:From in user-secrets or appsettings.
-fail: [Email] Email skipped: missing From address. Set Email:Smtp:From in user-secrets or appsettings.
+fail: [Email] Quote.Submitted abc123 skipped: missing From address. Set Email:Smtp:From in user-secrets or appsettings.
+fail: [Email] Booking.Submitted def456 skipped: missing From address. Set Email:Smtp:From in user-secrets or appsettings.
 ```
 
-No exception. No crash. Fix: set the secret and restart.
+No exception. No crash. Each skipped send identifies exactly which event and record was affected. Fix: set the secret and restart.
