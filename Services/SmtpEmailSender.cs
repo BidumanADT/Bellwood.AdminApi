@@ -14,13 +14,112 @@ namespace Bellwood.AdminApi.Services
     public sealed class SmtpEmailSender : IEmailSender
     {
         private readonly EmailOptions _opt;
+        private readonly ILogger<SmtpEmailSender> _logger;
         private static readonly JsonSerializerOptions _jsonOpts = new()
         {
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
             WriteIndented = true
         };
 
-        public SmtpEmailSender(IOptions<EmailOptions> opt) => _opt = opt.Value;
+        public SmtpEmailSender(IOptions<EmailOptions> opt, ILogger<SmtpEmailSender> logger)
+        {
+            _opt = opt.Value;
+            _logger = logger;
+        }
+
+        // ===================================================================
+        // ADDRESS RESOLUTION HELPERS
+        // ===================================================================
+
+        /// <summary>
+        /// Resolve and validate the From address from config.
+        /// Returns null (and logs an error) if the address is missing or invalid.
+        /// </summary>
+        private MailboxAddress? ResolveFrom()
+        {
+            var raw = _opt.Smtp.From?.Trim();
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                _logger.LogError("[Email] Email skipped: missing From address. Set Email:Smtp:From in user-secrets or appsettings.");
+                return null;
+            }
+            if (!MailboxAddress.TryParse(ParserOptions.Default, raw, out var mailbox))
+            {
+                _logger.LogError("[Email] Email skipped: '{Address}' is not a valid From email address.", raw);
+                return null;
+            }
+            return mailbox;
+        }
+
+        /// <summary>
+        /// Resolve and validate the To address, applying override if enabled.
+        /// <paramref name="intendedAddress"/> is the original intended recipient (e.g. affiliate email, passenger email).
+        /// When null, falls back to _opt.To (the staff inbox).
+        /// If OverrideRecipients.Enabled, the override address is used instead.
+        /// Returns null (and logs an error) if the resolved address is missing or invalid.
+        /// </summary>
+        private MailboxAddress? ResolveTo(string? intendedAddress = null)
+        {
+            string? raw;
+            if (_opt.OverrideRecipients.Enabled)
+            {
+                raw = _opt.OverrideRecipients.Address?.Trim();
+            }
+            else
+            {
+                raw = (intendedAddress ?? _opt.To)?.Trim();
+            }
+
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                _logger.LogError("[Email] Email skipped: missing To address. Check Email:To or Email:OverrideRecipients:Address in config.");
+                return null;
+            }
+            if (!MailboxAddress.TryParse(ParserOptions.Default, raw, out var mailbox))
+            {
+                _logger.LogError("[Email] Email skipped: '{Address}' is not a valid To email address.", raw);
+                return null;
+            }
+            return mailbox;
+        }
+
+        /// <summary>
+        /// Build a MimeMessage with resolved From/To addresses.
+        /// Returns null if either address cannot be resolved (error already logged).
+        /// </summary>
+        private MimeMessage? BuildMessage(string? intendedTo = null)
+        {
+            var from = ResolveFrom();
+            var to = ResolveTo(intendedTo);
+            if (from is null || to is null)
+                return null;
+
+            var msg = new MimeMessage();
+            msg.From.Add(from);
+            msg.To.Add(to);
+
+            if (_opt.IsAlphaSandbox)
+            {
+                _logger.LogInformation("[Email/AlphaSandbox] From={From} To={To} (override={Override})",
+                    from.Address, to.Address, _opt.OverrideRecipients.Enabled);
+            }
+
+            return msg;
+        }
+
+        /// <summary>
+        /// Build the subject line, optionally appending the original recipient when override is active.
+        /// </summary>
+        private string BuildSubject(string baseSubject, string? originalRecipient = null)
+        {
+            if (_opt.IncludeOriginalRecipientInSubject
+                && _opt.OverrideRecipients.Enabled
+                && !string.IsNullOrWhiteSpace(originalRecipient))
+            {
+                return $"{baseSubject} [orig: {originalRecipient}]";
+            }
+            return baseSubject;
+        }
 
         // ===================================================================
         // PUBLIC METHODS
@@ -28,10 +127,11 @@ namespace Bellwood.AdminApi.Services
 
         public async Task SendQuoteAsync(QuoteDraft draft, string referenceId)
         {
-            var msg = new MimeMessage();
-            msg.From.Add(MailboxAddress.Parse(_opt.From));
-            msg.To.Add(MailboxAddress.Parse(_opt.To));
-            msg.Subject = $"{_opt.SubjectPrefix} {referenceId} - {draft.Passenger} / {draft.VehicleClass}";
+            var msg = BuildMessage();
+            if (msg is null) return;
+
+            msg.Subject = BuildSubject(
+                $"{_opt.SubjectPrefix} {referenceId} - {draft.Passenger} / {draft.VehicleClass}");
 
             var context = new EmailContext(draft, referenceId);
             var builder = new BodyBuilder
@@ -46,10 +146,11 @@ namespace Bellwood.AdminApi.Services
 
         public async Task SendBookingAsync(QuoteDraft draft, string referenceId)
         {
-            var msg = new MimeMessage();
-            msg.From.Add(MailboxAddress.Parse(_opt.From));
-            msg.To.Add(MailboxAddress.Parse(_opt.To));
-            msg.Subject = $"Bellwood Elite - New Booking Request - {draft.PickupDateTime:MMM dd, yyyy @ h:mm tt} - {draft.Passenger}";
+            var msg = BuildMessage();
+            if (msg is null) return;
+
+            msg.Subject = BuildSubject(
+                $"Bellwood Elite - New Booking Request - {draft.PickupDateTime:MMM dd, yyyy @ h:mm tt} - {draft.Passenger}");
 
             var context = new EmailContext(draft, referenceId);
             var builder = new BodyBuilder
@@ -64,10 +165,11 @@ namespace Bellwood.AdminApi.Services
 
         public async Task SendBookingCancellationAsync(QuoteDraft draft, string referenceId, string bookerName)
         {
-            var msg = new MimeMessage();
-            msg.From.Add(MailboxAddress.Parse(_opt.From));
-            msg.To.Add(MailboxAddress.Parse(_opt.To));
-            msg.Subject = $"Bellwood Elite - BOOKING CANCELLED - {draft.PickupDateTime:MMM dd, yyyy @ h:mm tt} - {draft.Passenger}";
+            var msg = BuildMessage();
+            if (msg is null) return;
+
+            msg.Subject = BuildSubject(
+                $"Bellwood Elite - BOOKING CANCELLED - {draft.PickupDateTime:MMM dd, yyyy @ h:mm tt} - {draft.Passenger}");
 
             var context = new EmailContext(draft, referenceId);
             var builder = new BodyBuilder
@@ -82,10 +184,12 @@ namespace Bellwood.AdminApi.Services
 
         public async Task SendDriverAssignmentAsync(BookingRecord booking, Driver driver, Affiliate affiliate)
         {
-            var msg = new MimeMessage();
-            msg.From.Add(MailboxAddress.Parse(_opt.From));
-            msg.To.Add(MailboxAddress.Parse(affiliate.Email));
-            msg.Subject = $"Bellwood Elite - Driver Assignment - {booking.PickupDateTime:MMM dd, yyyy @ h:mm tt}";
+            var msg = BuildMessage(affiliate.Email);
+            if (msg is null) return;
+
+            msg.Subject = BuildSubject(
+                $"Bellwood Elite - Driver Assignment - {booking.PickupDateTime:MMM dd, yyyy @ h:mm tt}",
+                affiliate.Email);
 
             string H(string? s) => WebUtility.HtmlEncode(s ?? "");
 
@@ -278,6 +382,18 @@ Bellwood Elite Team"
 
         private async Task SendEmailAsync(MimeMessage msg)
         {
+            if (_opt.IsDisabled)
+            {
+                _logger.LogDebug("[Email] Mode=Disabled — skipping send.");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(_opt.Host))
+            {
+                _logger.LogWarning("[Email] SMTP host is not configured — skipping send.");
+                return;
+            }
+
             using var smtp = new SmtpClient();
             await smtp.ConnectAsync(_opt.Host, _opt.Port,
                 _opt.UseStartTls ? SecureSocketOptions.StartTls : SecureSocketOptions.Auto);
@@ -295,14 +411,13 @@ Bellwood Elite Team"
 
         public async Task SendQuoteResponseAsync(QuoteRecord quote)
         {
-            var msg = new MimeMessage();
-            msg.From.Add(MailboxAddress.Parse(_opt.From));
-            
-            // Send to passenger (booker's email)
-            var recipientEmail = quote.Draft?.Booker?.EmailAddress ?? _opt.To;
-            msg.To.Add(MailboxAddress.Parse(recipientEmail));
-            
-            msg.Subject = $"Bellwood Elite - Quote Response - {quote.PassengerName} - {quote.PickupDateTime:MMM dd, yyyy}";
+            var intendedTo = quote.Draft?.Booker?.EmailAddress;
+            var msg = BuildMessage(intendedTo ?? _opt.To);
+            if (msg is null) return;
+
+            msg.Subject = BuildSubject(
+                $"Bellwood Elite - Quote Response - {quote.PassengerName} - {quote.PickupDateTime:MMM dd, yyyy}",
+                intendedTo);
 
             string H(string? s) => WebUtility.HtmlEncode(s ?? "");
 
@@ -376,13 +491,11 @@ Bellwood Elite Team"
 
     public async Task SendQuoteAcceptedAsync(QuoteRecord quote, string bookingId)
     {
-        var msg = new MimeMessage();
-        msg.From.Add(MailboxAddress.Parse(_opt.From));
-        
-        // Send to Bellwood staff
-        msg.To.Add(MailboxAddress.Parse(_opt.To));
-        
-        msg.Subject = $"Bellwood Elite - Quote ACCEPTED - {quote.PassengerName} - Booking {bookingId}";
+        var msg = BuildMessage();
+        if (msg is null) return;
+
+        msg.Subject = BuildSubject(
+            $"Bellwood Elite - Quote ACCEPTED - {quote.PassengerName} - Booking {bookingId}");
 
         string H(string? s) => WebUtility.HtmlEncode(s ?? "");
 
@@ -724,6 +837,7 @@ Bellwood Elite Team"
         {
             return string.IsNullOrWhiteSpace(Draft.AdditionalRequestOtherText) ? "" : $" — {Draft.AdditionalRequestOtherText}";
         }
-    }
-}
-}
+    } // end EmailContext
+
+    } // end SmtpEmailSender
+} // end namespace

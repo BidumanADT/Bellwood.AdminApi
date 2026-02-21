@@ -7,6 +7,10 @@
         public EmailOverrideRecipientsOptions OverrideRecipients { get; set; } = new();
         public bool IncludeOriginalRecipientInSubject { get; set; } = false;
 
+        // Convenience properties for mode checks
+        public bool IsAlphaSandbox => Mode.Equals("AlphaSandbox", StringComparison.OrdinalIgnoreCase);
+        public bool IsDisabled => Mode.Equals("Disabled", StringComparison.OrdinalIgnoreCase);
+
         // Backward-compatible accessors for existing sender behavior.
         public string Host => Smtp.Host;
         public int Port => Smtp.Port;

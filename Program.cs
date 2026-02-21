@@ -3131,7 +3131,7 @@ app.MapPost("/api/admin/data-retention/cleanup", async (
     // Audit log manual cleanup
     await auditLogger.LogSuccessAsync(
         context.User,
-        "DataRetention.ManualCleanup",
+        AuditActions.DataRetentionCleanup,
         "System",
         details: new {
             auditLogsDeleted,
@@ -3470,6 +3470,25 @@ app.MapPut("/users/{userId}/disable", async (
 .WithName("DisableUser")
 .RequireAuthorization("AdminOnly")
 .WithTags("Admin", "Users");
+
+// ===================================================================
+// STARTUP: EMAIL CONFIGURATION VALIDATION
+// ===================================================================
+{
+    var emailFrom = builder.Configuration["Email:Smtp:From"];
+    var emailHost = builder.Configuration["Email:Smtp:Host"];
+    var emailOverrideEnabled = builder.Configuration["Email:OverrideRecipients:Enabled"];
+    var emailOverrideAddr = builder.Configuration["Email:OverrideRecipients:Address"];
+
+    Console.WriteLine($"[Startup] Environment: {builder.Environment.EnvironmentName}");
+    Console.WriteLine($"[Startup] Email Mode: {builder.Configuration["Email:Mode"]}");
+    Console.WriteLine($"[Startup] Email:Smtp:From         = {(string.IsNullOrWhiteSpace(emailFrom) ? "*** NOT SET ***" : "configured")}");
+    Console.WriteLine($"[Startup] Email:Smtp:Host         = {(string.IsNullOrWhiteSpace(emailHost) ? "*** NOT SET ***" : emailHost)}");
+    Console.WriteLine($"[Startup] Email:Smtp:Port         = {builder.Configuration["Email:Smtp:Port"] ?? "(default)"}");
+    Console.WriteLine($"[Startup] Email:Smtp:UseStartTls  = {builder.Configuration["Email:Smtp:UseStartTls"] ?? "(default)"}");
+    Console.WriteLine($"[Startup] Email:OverrideRecipients:Enabled = {emailOverrideEnabled ?? "false"}");
+    Console.WriteLine($"[Startup] Email:OverrideRecipients:Address = {(string.IsNullOrWhiteSpace(emailOverrideAddr) ? "*** NOT SET ***" : emailOverrideAddr)}");
+}
 
 app.Run();
 
