@@ -21,6 +21,12 @@ namespace Bellwood.AdminApi.Services
             WriteIndented = true
         };
 
+        // AlphaSandbox throttle: serialize sends and enforce >= 1100ms between SMTP connections
+        // so we stay under Mailtrap's 1 email/second limit during seed-all.
+        private static readonly SemaphoreSlim _smtpGate = new(1, 1);
+        private static DateTime _nextAllowedUtc = DateTime.MinValue;
+        private static readonly int[] _retryDelaysMs = { 1200, 2000, 3000 };
+
         public SmtpEmailSender(IOptions<EmailOptions> opt, ILogger<SmtpEmailSender> logger)
         {
             _opt = opt.Value;
@@ -398,15 +404,63 @@ Bellwood Elite Team"
                 return;
             }
 
-            using var smtp = new SmtpClient();
-            await smtp.ConnectAsync(_opt.Host, _opt.Port,
-                _opt.UseStartTls ? SecureSocketOptions.StartTls : SecureSocketOptions.Auto);
+            // AlphaSandbox: serialize all sends and enforce minimum spacing to avoid rate limits.
+            if (_opt.IsAlphaSandbox)
+                await _smtpGate.WaitAsync();
 
-            if (!string.IsNullOrWhiteSpace(_opt.Username))
-                await smtp.AuthenticateAsync(_opt.Username, _opt.Password);
+            try
+            {
+                for (int attempt = 0; attempt <= _retryDelaysMs.Length; attempt++)
+                {
+                    // Enforce minimum gap between sends (AlphaSandbox only).
+                    if (_opt.IsAlphaSandbox)
+                    {
+                        var wait = _nextAllowedUtc - DateTime.UtcNow;
+                        if (wait > TimeSpan.Zero)
+                            await Task.Delay(wait);
+                    }
 
-            await smtp.SendAsync(msg);
-            await smtp.DisconnectAsync(true);
+                    try
+                    {
+                        using var smtp = new SmtpClient();
+                        await smtp.ConnectAsync(_opt.Host, _opt.Port,
+                            _opt.UseStartTls ? SecureSocketOptions.StartTls : SecureSocketOptions.Auto);
+
+                        if (!string.IsNullOrWhiteSpace(_opt.Username))
+                            await smtp.AuthenticateAsync(_opt.Username, _opt.Password);
+
+                        await smtp.SendAsync(msg);
+                        await smtp.DisconnectAsync(true);
+
+                        // Update the gate timestamp after a successful send.
+                        if (_opt.IsAlphaSandbox)
+                            _nextAllowedUtc = DateTime.UtcNow.AddMilliseconds(1100);
+
+                        return; // success — exit retry loop
+                    }
+                    catch (SmtpCommandException ex)
+                        when (attempt < _retryDelaysMs.Length
+                              && (ex.Message.Contains("Too many emails per second", StringComparison.OrdinalIgnoreCase)
+                                  || ex.Message.Contains("5.7.0", StringComparison.Ordinal)))
+                    {
+                        // Mailtrap rate-limit hit — wait then retry.
+                        var delay = _retryDelaysMs[attempt];
+                        _logger.LogWarning("[Email] Rate limit on attempt {Attempt}/{Max} — retrying in {Delay}ms. ({Message})",
+                            attempt + 1, _retryDelaysMs.Length, delay, ex.Message);
+                        await Task.Delay(delay);
+
+                        // Push the gate forward so the next attempt respects spacing too.
+                        if (_opt.IsAlphaSandbox)
+                            _nextAllowedUtc = DateTime.UtcNow.AddMilliseconds(delay);
+                    }
+                    // All other exceptions propagate normally.
+                }
+            }
+            finally
+            {
+                if (_opt.IsAlphaSandbox)
+                    _smtpGate.Release();
+            }
         }
 
         // ===================================================================
