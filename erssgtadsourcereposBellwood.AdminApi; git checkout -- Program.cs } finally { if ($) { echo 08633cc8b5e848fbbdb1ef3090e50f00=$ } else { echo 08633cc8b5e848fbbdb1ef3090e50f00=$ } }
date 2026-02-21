@@ -1,0 +1,48 @@
+[1mdiff --git a/Program.cs b/Program.cs[m
+[1mindex d6e0764..966d13b 100644[m
+[1m--- a/Program.cs[m
+[1m+++ b/Program.cs[m
+[36m@@ -3131,7 +3131,7 @@[m [mapp.MapPost("/api/admin/data-retention/cleanup", async ([m
+     // Audit log manual cleanup[m
+     await auditLogger.LogSuccessAsync([m
+         context.User,[m
+[31m-        "DataRetention.ManualCleanup",[m
+[32m+[m[32m        AuditActions.DataRetention.ManualCleanup,[m
+         "System",[m
+         details: new {[m
+             auditLogsDeleted,[m
+[36m@@ -3471,19 +3471,25 @@[m [mapp.MapPut("/users/{userId}/disable", async ([m
+ .RequireAuthorization("AdminOnly")[m
+ .WithTags("Admin", "Users");[m
+ [m
+[31m-app.Run();[m
+[31m-[m
+ // ===================================================================[m
+[31m-// REQUEST/RESPONSE DTOs[m
+[32m+[m[32m// STARTUP: EMAIL CONFIGURATION VALIDATION[m
+ // ===================================================================[m
+ [m
+[31m-/// <summary>[m
+[31m-/// Request DTO for clearing all audit logs.[m
+[31m-/// Alpha: Requires confirmation phrase for safety.[m
+[31m-/// </summary>[m
+[31m-/// <param name="Confirm">Must be exactly "CLEAR" (case-sensitive)</param>[m
+[31m-public record ClearAuditLogsRequest(string Confirm);[m
+[32m+[m[32mConsole.WriteLine($"[Startup] Environment: {builder.Environment.EnvironmentName}");[m
+[32m+[m[32mConsole.WriteLine($"[Startup] Email Mode: {builder.Configuration["Email:Mode"]}");[m
+[32m+[m
+[32m+[m[32mvar emailFrom = builder.Configuration["Email:Smtp:From"];[m
+[32m+[m[32mvar emailOverride = builder.Configuration["Email:OverrideRecipients:Enabled"];[m
+[32m+[m[32mvar emailOverrideAddr = builder.Configuration["Email:OverrideRecipients:Address"];[m
+ [m
+[32m+[m[32mConsole.WriteLine($"[Startup] Email:Smtp:From         = {(string.IsNullOrWhiteSpace(emailFrom) ? "*** NOT SET ***" : "configured")}");[m
+[32m+[m[32mConsole.WriteLine($"[Startup] Email:Smtp:Host         = {(string.IsNullOrWhiteSpace(builder.Configuration["Email:Smtp:Host"]) ? "*** NOT SET ***" : builder.Configuration["Email:Smtp:Host"])}");[m
+[32m+[m[32mConsole.WriteLine($"[Startup] Email:Smtp:Port         = {builder.Configuration["Email:Smtp:Port"] ?? "(default)"}");[m
+[32m+[m[32mConsole.WriteLine($"[Startup] Email:Smtp:UseStartTls  = {builder.Configuration["Email:Smtp:UseStartTls"] ?? "(default)"}");[m
+[32m+[m[32mConsole.WriteLine($"[Startup] Email:OverrideRecipients:Enabled = {emailOverride ?? "false"}");[m
+[32m+[m[32mConsole.WriteLine($"[Startup] Email:OverrideRecipients:Address = {(string.IsNullOrWhiteSpace(emailOverrideAddr) ? "*** NOT SET ***" : emailOverrideAddr)}");[m
+[32m+[m
+[32m+[m[32mapp.Run();[m
+ // ===================================================================[m
+ // END OF FILE[m
+ // ===================================================================[m
