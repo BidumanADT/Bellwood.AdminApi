@@ -6,6 +6,9 @@ namespace Bellwood.AdminApi.Middleware;
 
 public sealed class StructuredRequestLoggingMiddleware
 {
+    // Key used to store the generated errorId in HttpContext.Items for downstream correlation.
+    public const string ErrorIdItemKey = "errorId";
+
     private readonly RequestDelegate _next;
     private readonly ILogger<StructuredRequestLoggingMiddleware> _logger;
 
@@ -46,6 +49,9 @@ public sealed class StructuredRequestLoggingMiddleware
                 sw.Stop();
                 var errorId = Guid.NewGuid().ToString("N");
 
+                // Store errorId for downstream middleware (e.g. ErrorTrackingMiddleware) to correlate.
+                context.Items[ErrorIdItemKey] = errorId;
+
                 _logger.LogError(
                     ex,
                     "Unhandled exception for {Method} {RequestPath} with errorId {ErrorId} after {ElapsedMs}ms",
@@ -54,18 +60,10 @@ public sealed class StructuredRequestLoggingMiddleware
                     errorId,
                     sw.ElapsedMilliseconds);
 
-                if (!context.Response.HasStarted)
-                {
-                    context.Response.Clear();
-                    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-                    context.Response.ContentType = "application/json";
-                    await context.Response.WriteAsJsonAsync(new
-                    {
-                        title = "An unexpected error occurred.",
-                        status = StatusCodes.Status500InternalServerError,
-                        errorId
-                    });
-                }
+                // Do NOT write a response here. Rethrow so ErrorTrackingMiddleware and
+                // ASP.NET's configured exception handler (UseExceptionHandler / developer
+                // exception page) can observe and handle the exception normally.
+                throw;
             }
         }
     }
