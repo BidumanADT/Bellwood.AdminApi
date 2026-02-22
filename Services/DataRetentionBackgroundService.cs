@@ -80,7 +80,10 @@ public sealed class DataRetentionBackgroundService : BackgroundService
 
     private async Task RunDataRetentionTasksAsync(CancellationToken ct)
     {
-        _logger.LogInformation("Starting scheduled data retention cleanup tasks");
+        var runId = Guid.NewGuid().ToString("N");
+        var startedUtc = DateTime.UtcNow;
+        _logger.LogInformation("Background job started {JobName} {RunId} at {StartedUtc}",
+            "DataRetentionCleanup", runId, startedUtc);
 
         using var scope = _serviceProvider.CreateScope();
         var retentionService = scope.ServiceProvider.GetRequiredService<IDataRetentionService>();
@@ -140,7 +143,8 @@ public sealed class DataRetentionBackgroundService : BackgroundService
             results.errors.Add($"Quote deletion failed: {ex.Message}");
         }
 
-        var duration = DateTime.UtcNow - results.startTime;
+        var endedUtc = DateTime.UtcNow;
+        var duration = endedUtc - startedUtc;
 
         // Log completion summary
         _logger.LogInformation(
@@ -148,6 +152,16 @@ public sealed class DataRetentionBackgroundService : BackgroundService
             "Audit logs deleted: {AuditLogs}, Bookings anonymized: {Bookings}, Quotes deleted: {Quotes}, Errors: {ErrorCount}",
             duration.TotalSeconds, results.auditLogsDeleted, results.bookingsAnonymized, 
             results.quotesDeleted, results.errors.Count);
+
+        _logger.LogInformation(
+            "Background job run summary {JobName} {RunId} {StartedUtc} {EndedUtc} {ElapsedMs} {ItemsProcessed} {ItemsFailed}",
+            "DataRetentionCleanup",
+            runId,
+            startedUtc,
+            endedUtc,
+            duration.TotalMilliseconds,
+            results.auditLogsDeleted + results.bookingsAnonymized + results.quotesDeleted,
+            results.errors.Count);
 
         // Audit log the retention cleanup
         try
