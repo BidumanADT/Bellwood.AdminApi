@@ -14,11 +14,23 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using System.Text.Json;
+using Serilog;
+using Serilog.Formatting.Compact;
 
 // Phase 1: Use static import for authorization helper methods
 using static Bellwood.AdminApi.Services.UserAuthorizationHelper;
 
 var builder = WebApplication.CreateBuilder(args);
+
+Log.Logger = new LoggerConfiguration()
+    .ReadFrom.Configuration(builder.Configuration)
+    .Enrich.FromLogContext()
+    .Enrich.WithProperty("service", "AdminApi")
+    .Enrich.WithProperty("environment", "Alpha")
+    .WriteTo.Console(new RenderedCompactJsonFormatter())
+    .CreateLogger();
+
+builder.Host.UseSerilog();
 // Load user-secrets in Development AND Alpha (local test environments)
 if (builder.Environment.IsDevelopment() || builder.Environment.EnvironmentName.Equals("Alpha", StringComparison.OrdinalIgnoreCase))
 {
@@ -50,6 +62,7 @@ builder.Services.AddSingleton<IDriverRepository, FileDriverRepository>();
 // Phase 3: Audit log repository and logger service
 builder.Services.AddSingleton<IAuditLogRepository, FileAuditLogRepository>();
 builder.Services.AddSingleton<AuditLogger>();
+builder.Services.AddSingleton<IAuditEventRepository, SqliteAuditEventRepository>();
 
 // Phase 3C: Data protection services
 builder.Services.AddSingleton<ISensitiveDataProtector, SensitiveDataProtector>();
@@ -62,11 +75,15 @@ builder.Services.AddMemoryCache(); // For credential caching
 builder.Services.AddSingleton<IOAuthCredentialRepository, FileOAuthCredentialRepository>();
 builder.Services.AddSingleton<OAuthCredentialService>();
 builder.Services.AddHttpClient<AuthServerUserManagementService>()
+    .AddHttpMessageHandler<CorrelationIdHeaderHandler>()
     .ConfigureHttpClient(client =>
     {
         // Prevent hanging if AuthServer is slow (not down)
         client.Timeout = TimeSpan.FromSeconds(10);
     });
+builder.Services.AddHttpClient("health-authserver");
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddTransient<CorrelationIdHeaderHandler>();
 
 // Phase 4: LimoAnywhere integration (stub implementation)
 builder.Services.AddSingleton<ILimoAnywhereService, LimoAnywhereServiceStub>();
@@ -85,7 +102,11 @@ builder.Services.AddHostedService<LocationBroadcastService>();
 
 // Phase 3: Enhanced health checks
 builder.Services.AddHealthChecks()
-    .AddCheck<AdminApiHealthCheck>("AdminAPI", tags: new[] { "ready", "live" });
+    .AddCheck("live", () => HealthCheckResult.Healthy(), tags: new[] { "live" })
+    .AddCheck<AdminApiHealthCheck>("admin-api", tags: new[] { "ready" })
+    .AddCheck<AuthServerHealthCheck>("auth-server", tags: new[] { "ready" })
+    .AddCheck<AuditEventStoreHealthCheck>("audit-event-store", tags: new[] { "ready" })
+    .AddCheck<SmtpHealthCheck>("smtp", tags: new[] { "ready" });
 
 // API documentation
 builder.Services.AddEndpointsApiExplorer();
@@ -237,12 +258,15 @@ var app = builder.Build();
 // ===================================================================
 
 app.UseCors();
+app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseMiddleware<StructuredRequestLoggingMiddleware>();
 
 // Phase 3: Error tracking middleware (before authentication to track all errors)
 app.UseMiddleware<ErrorTrackingMiddleware>();
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<AuditEventMiddleware>();
 
 // Map SignalR hub for real-time location updates
 app.MapHub<LocationHub>("/hubs/location");
