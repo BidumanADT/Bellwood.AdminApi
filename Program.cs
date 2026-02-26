@@ -67,6 +67,8 @@ else
     builder.Services.AddTransient<IEmailSender, NoOpEmailSender>();
 }
 
+builder.Services.AddScoped<INotificationPublisher, NotificationPublisher>();
+
 // Repository services (file-backed storage)
 builder.Services.AddSingleton<IQuoteRepository, FileQuoteRepository>();
 builder.Services.AddSingleton<IBookingRepository, FileBookingRepository>();
@@ -497,7 +499,7 @@ app.MapPost("/quotes/seed", async (HttpContext context, IQuoteRepository repo, A
 app.MapPost("/quotes", async (
     [FromBody] QuoteDraft draft,
     HttpContext context,
-    IEmailSender email,
+    INotificationPublisher notifications,
     IQuoteRepository repo,
     AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
@@ -540,7 +542,7 @@ app.MapPost("/quotes", async (
 
     try
     {
-        await email.SendQuoteAsync(draft, rec.Id);
+        await notifications.PublishQuoteSubmittedAsync(draft, rec.Id);
         log.LogInformation("Quote {Id} submitted for {Passenger} by user {UserId}", 
             rec.Id, rec.PassengerName, rec.CreatedByUserId ?? "unknown");
     }
@@ -772,7 +774,7 @@ app.MapPost("/quotes/{id}/respond", async (
     [FromBody] QuoteResponseRequest request,
     HttpContext context,
     IQuoteRepository repo,
-    IEmailSender email,
+    INotificationPublisher notifications,
     AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
 {
@@ -850,7 +852,7 @@ app.MapPost("/quotes/{id}/respond", async (
     // Phase Alpha: Send email notification to passenger
     try
     {
-        await email.SendQuoteResponseAsync(quote);
+        await notifications.PublishQuoteResponseAsync(quote);
         log.LogInformation("Quote response email sent to passenger for quote {Id}", id);
     }
     catch (Exception ex)
@@ -883,7 +885,7 @@ app.MapPost("/quotes/{id}/accept", async (
     HttpContext context,
     IQuoteRepository quoteRepo,
     IBookingRepository bookingRepo,
-    IEmailSender email,
+    INotificationPublisher notifications,
     AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
 {
@@ -1004,7 +1006,7 @@ app.MapPost("/quotes/{id}/accept", async (
     // Phase Alpha: Send email notification to Bellwood staff
     try
     {
-        await email.SendQuoteAcceptedAsync(quote, booking.Id);
+        await notifications.PublishQuoteAcceptedAsync(quote, booking.Id);
         log.LogInformation("Quote accepted email sent to staff for quote {QuoteId}, booking {BookingId}", 
             id, booking.Id);
     }
@@ -1352,7 +1354,7 @@ app.MapPost("/bookings/seed", async (HttpContext context, IBookingRepository rep
 app.MapPost("/bookings", async (
     [FromBody] QuoteDraft draft,
     HttpContext context,
-    IEmailSender email,
+    INotificationPublisher notifications,
     IBookingRepository repo,
     AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
@@ -1396,7 +1398,7 @@ app.MapPost("/bookings", async (
 
     try
     {
-        await email.SendBookingAsync(draft, rec.Id);
+        await notifications.PublishBookingCreatedAsync(draft, rec.Id);
         log.LogInformation("Booking {Id} submitted for {Passenger} by user {UserId}", 
             rec.Id, rec.PassengerName, currentUserId ?? "unknown");
     }
@@ -1604,7 +1606,7 @@ app.MapPost("/bookings/{id}/cancel", async (
     string id,
     HttpContext context,
     IBookingRepository repo,
-    IEmailSender email,
+    INotificationPublisher notifications,
     AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
 {
@@ -1674,7 +1676,7 @@ app.MapPost("/bookings/{id}/cancel", async (
     // Send cancellation email
     try
     {
-        await email.SendBookingCancellationAsync(booking.Draft, id, booking.BookerName);
+        await notifications.PublishBookingCancellationAsync(booking.Draft, id, booking.BookerName);
         log.LogInformation("Booking {Id} cancelled by user {UserId} (booker: {Booker})", 
             id, currentUserId, booking.BookerName);
     }
@@ -2602,7 +2604,7 @@ app.MapPost("/bookings/{bookingId}/assign-driver", async (
     IBookingRepository bookingRepo,
     IDriverRepository driverRepo,
     IAffiliateRepository affiliateRepo,
-    IEmailSender email,
+    INotificationPublisher notifications,
     AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
 {
@@ -2671,7 +2673,7 @@ app.MapPost("/bookings/{bookingId}/assign-driver", async (
     // Send email notification to affiliate
     try
     {
-        await email.SendDriverAssignmentAsync(booking, driver, affiliate);
+        await notifications.PublishDriverAssignedAsync(booking, driver, affiliate);
         log.LogInformation("Driver {DriverName} (UserUid: {UserUid}) assigned to booking {BookingId}, email sent to {AffiliateEmail}",
             driver.Name, driver.UserUid, bookingId, affiliate.Email);
     }
