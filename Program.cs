@@ -51,7 +51,21 @@ builder.Services.AddApplicationInsightsTelemetry(options =>
 
 // Email configuration and sender
 builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection("Email"));
-builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
+builder.Services.AddTransient<SmtpEmailSender>();
+
+var emailOptions = builder.Configuration.GetSection("Email").Get<EmailOptions>() ?? new EmailOptions();
+if (emailOptions.Mode.Equals("DevPapercut", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddTransient<IEmailSender, PapercutEmailSender>();
+}
+else if (emailOptions.Mode.Equals("AlphaSandbox", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddTransient<IEmailSender, SmtpSandboxEmailSender>();
+}
+else
+{
+    builder.Services.AddTransient<IEmailSender, NoOpEmailSender>();
+}
 
 // Repository services (file-backed storage)
 builder.Services.AddSingleton<IQuoteRepository, FileQuoteRepository>();
