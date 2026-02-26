@@ -1,5 +1,21 @@
 [
   {
+    "Id": "58fbf0cdd1ca42e79c8aefb58e9cca07",
+    "Timestamp": "2026-02-26T02:00:00.0838952Z",
+    "UserId": "system",
+    "Username": "system",
+    "UserRole": "system",
+    "Action": "System.DataRetention.Cleanup",
+    "EntityType": "System",
+    "EntityId": null,
+    "Details": "{\u0022auditLogsDeleted\u0022:0,\u0022bookingsAnonymized\u0022:0,\u0022quotesDeleted\u0022:0,\u0022durationSeconds\u0022:0.0692124,\u0022errors\u0022:null}",
+    "IpAddress": null,
+    "HttpMethod": null,
+    "EndpointPath": null,
+    "Result": "Success",
+    "ErrorMessage": null
+  },
+  {
     "Id": "2116fd1a233e498588de73962b4f63dc",
     "Timestamp": "2026-02-26T00:34:01.4087825Z",
     "UserId": "914562c8-f4d2-4bb8-ad7a-f59526356132",
