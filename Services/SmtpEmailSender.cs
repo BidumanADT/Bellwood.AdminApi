@@ -122,13 +122,19 @@ namespace Bellwood.AdminApi.Services
         /// </summary>
         private string BuildSubject(string baseSubject, string? originalRecipient = null)
         {
+            var subject = baseSubject;
+
+            if (_opt.IsAlphaSandbox && _opt.OverrideRecipients.Enabled)
+                subject = $"[ALPHA-OVERRIDE] {subject}";
+
             if (_opt.IncludeOriginalRecipientInSubject
                 && _opt.OverrideRecipients.Enabled
                 && !string.IsNullOrWhiteSpace(originalRecipient))
             {
-                return $"{baseSubject} [orig: {originalRecipient}]";
+                subject = $"{subject} [orig: {originalRecipient}]";
             }
-            return baseSubject;
+
+            return subject;
         }
 
         // ===================================================================
