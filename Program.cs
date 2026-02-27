@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 using System.Text.Json;
 using Serilog;
 using Serilog.Formatting.Compact;
@@ -52,20 +53,19 @@ builder.Services.AddApplicationInsightsTelemetry(options =>
 // Email configuration and sender
 builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection("Email"));
 builder.Services.AddTransient<SmtpEmailSender>();
-
-var emailOptions = builder.Configuration.GetSection("Email").Get<EmailOptions>() ?? new EmailOptions();
-if (emailOptions.Mode.Equals("DevPapercut", StringComparison.OrdinalIgnoreCase))
+builder.Services.AddTransient<PapercutEmailSender>();
+builder.Services.AddTransient<SmtpSandboxEmailSender>();
+builder.Services.AddTransient<NoOpEmailSender>();
+builder.Services.AddTransient<IEmailSender>(sp =>
 {
-    builder.Services.AddTransient<IEmailSender, PapercutEmailSender>();
-}
-else if (emailOptions.Mode.Equals("AlphaSandbox", StringComparison.OrdinalIgnoreCase))
-{
-    builder.Services.AddTransient<IEmailSender, SmtpSandboxEmailSender>();
-}
-else
-{
-    builder.Services.AddTransient<IEmailSender, NoOpEmailSender>();
-}
+    var opts = sp.GetRequiredService<IOptions<EmailOptions>>().Value;
+    return opts.Mode switch
+    {
+        "DevPapercut" => sp.GetRequiredService<PapercutEmailSender>(),
+        "AlphaSandbox" => sp.GetRequiredService<SmtpSandboxEmailSender>(),
+        _ => sp.GetRequiredService<NoOpEmailSender>(),
+    };
+});
 
 builder.Services.AddScoped<INotificationPublisher, NotificationPublisher>();
 
