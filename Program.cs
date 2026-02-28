@@ -417,6 +417,38 @@ app.MapPut("/api/bookers/me", async ([FromBody] Passenger payload, HttpContext c
 .WithName("UpsertMyBookerProfile")
 .RequireAuthorization("BookerOrStaff");
 
+// Staff-only: upsert any booker profile by userId (admin/dispatcher)
+app.MapPut("/api/bookers/{userId}", async (
+    string userId,
+    [FromBody] BookerProfileUpsertRequest payload,
+    BookerProfileService service) =>
+{
+    if (!Guid.TryParse(userId, out _))
+        return Results.BadRequest(new { error = "userId must be a valid GUID." });
+
+    if (payload is null
+        || string.IsNullOrWhiteSpace(payload.FirstName)
+        || string.IsNullOrWhiteSpace(payload.LastName)
+        || string.IsNullOrWhiteSpace(payload.EmailAddress)
+        || string.IsNullOrWhiteSpace(payload.PhoneNumber))
+    {
+        return Results.BadRequest(new { error = "Booker firstName, lastName, emailAddress, and phoneNumber are required." });
+    }
+
+    var profile = await service.UpsertAsync(new BookerProfile
+    {
+        UserId = userId,
+        FirstName = payload.FirstName!.Trim(),
+        LastName = payload.LastName!.Trim(),
+        EmailAddress = payload.EmailAddress!.Trim(),
+        PhoneNumber = payload.PhoneNumber!.Trim()
+    });
+
+    return Results.Ok(profile);
+})
+.WithName("UpsertBookerProfileByStaff")
+.RequireAuthorization("StaffOnly");
+
 // ===================================================================
 // QUOTE ENDPOINTS
 // ===================================================================
