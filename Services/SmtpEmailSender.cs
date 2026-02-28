@@ -485,6 +485,9 @@ Bellwood Elite Team"
                 intendedTo);
 
             string H(string? s) => WebUtility.HtmlEncode(s ?? "");
+            var pickupSign = quote.Draft?.PickupStyle == PickupStyle.MeetAndGreet
+                ? (quote.Draft?.PickupSignText ?? "").Trim()
+                : "";
 
             var builder = new BodyBuilder
             {
@@ -500,6 +503,7 @@ Bellwood Elite Team"
                 <p><b>Vehicle Class:</b> {H(quote.VehicleClass)}</p>
                 <p><b>Pickup Location:</b> {H(quote.PickupLocation)}</p>
                 <p><b>Dropoff Location:</b> {H(quote.DropoffLocation ?? "As Directed")}</p>
+                <p><b>Pickup Style:</b> {H(quote.Draft?.PickupStyle.ToString())}{(string.IsNullOrWhiteSpace(pickupSign) ? "" : $" — Sign: {H(pickupSign)}")}</p>
                 
                 <hr/>
                 <h4>Our Response</h4>
@@ -527,6 +531,7 @@ Passenger: {quote.PassengerName}
 Vehicle Class: {quote.VehicleClass}
 Pickup Location: {quote.PickupLocation}
 Dropoff Location: {quote.DropoffLocation ?? "As Directed"}
+Pickup Style: {quote.Draft?.PickupStyle}{(string.IsNullOrWhiteSpace(pickupSign) ? "" : $" — Sign: {pickupSign}")}
 
 ----------------------------------------
 Our Response
@@ -563,6 +568,9 @@ Bellwood Elite Team"
             $"Bellwood Elite - Quote ACCEPTED - {quote.PassengerName} - Booking {bookingId}");
 
         string H(string? s) => WebUtility.HtmlEncode(s ?? "");
+        var pickupSign = quote.Draft?.PickupStyle == PickupStyle.MeetAndGreet
+            ? (quote.Draft?.PickupSignText ?? "").Trim()
+            : "";
 
         var builder = new BodyBuilder
         {
@@ -589,6 +597,7 @@ Bellwood Elite Team"
                 <p><b>Passenger:</b> {H(quote.PassengerName)}</p>
                 <p><b>Vehicle Class:</b> {H(quote.VehicleClass)}</p>
                 <p><b>Pickup:</b> {quote.EstimatedPickupTime:F} at {H(quote.PickupLocation)}</p>
+                <p><b>Pickup Style:</b> {H(quote.Draft?.PickupStyle.ToString())}{(string.IsNullOrWhiteSpace(pickupSign) ? "" : $" — Sign: {H(pickupSign)}")}</p>
                 <p><b>Dropoff:</b> {H(quote.DropoffLocation ?? "As Directed")}</p>
                 
                 <hr/>
@@ -619,6 +628,7 @@ Booker: {quote.BookerName}
 Passenger: {quote.PassengerName}
 Vehicle Class: {quote.VehicleClass}
 Pickup: {quote.EstimatedPickupTime:F} at {quote.PickupLocation}
+Pickup Style: {quote.Draft?.PickupStyle}{(string.IsNullOrWhiteSpace(pickupSign) ? "" : $" — Sign: {pickupSign}")}
 Dropoff: {quote.DropoffLocation ?? "As Directed"}
 
 ----------------------------------------
