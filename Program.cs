@@ -424,8 +424,12 @@ app.MapPut("/api/bookers/me", async ([FromBody] Passenger payload, HttpContext c
 // POST /quotes/seed - Seed sample quotes (DEV ONLY)
 app.MapPost("/quotes/seed", async (HttpContext context, IQuoteRepository repo, AuditLogger auditLogger) =>
 {
+    if (!app.Environment.IsDevelopment() &&
+        !app.Environment.EnvironmentName.Equals("Alpha", StringComparison.OrdinalIgnoreCase))
+        return Results.NotFound();
+
     var now = DateTime.UtcNow;
-    
+
     // Phase 1: Capture the authenticated user's ID for seed data
     var createdByUserId = GetUserId(context.User);
 
@@ -1194,8 +1198,12 @@ app.MapPost("/quotes/{id}/cancel", async (
 // POST /bookings/seed - Seed sample bookings (DEV ONLY)
 app.MapPost("/bookings/seed", async (HttpContext context, IBookingRepository repo, AuditLogger auditLogger) =>
 {
+    if (!app.Environment.IsDevelopment() &&
+        !app.Environment.EnvironmentName.Equals("Alpha", StringComparison.OrdinalIgnoreCase))
+        return Results.NotFound();
+
     var now = DateTime.UtcNow;
-    
+
     // Phase 1: Capture the authenticated user's ID for seed data
     var createdByUserId = GetUserId(context.User);
 
