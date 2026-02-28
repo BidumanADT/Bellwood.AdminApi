@@ -74,6 +74,8 @@ builder.Services.AddSingleton<IQuoteRepository, FileQuoteRepository>();
 builder.Services.AddSingleton<IBookingRepository, FileBookingRepository>();
 builder.Services.AddSingleton<IAffiliateRepository, FileAffiliateRepository>();
 builder.Services.AddSingleton<IDriverRepository, FileDriverRepository>();
+builder.Services.AddSingleton<IBookerRepository, FileBookerRepository>();
+builder.Services.AddSingleton<BookerProfileService>();
 
 // Phase 3: Audit log repository and logger service
 builder.Services.AddSingleton<IAuditLogRepository, FileAuditLogRepository>();
@@ -250,6 +252,9 @@ builder.Services.AddAuthorization(options =>
     // Phase 2: Booker policy (optional - for future use)
     options.AddPolicy("BookerOnly", policy =>
         policy.RequireRole("booker"));
+
+    options.AddPolicy("BookerOrStaff", policy =>
+        policy.RequireRole("booker", "admin", "dispatcher"));
 });
 
 // CORS for development
@@ -350,6 +355,100 @@ static string? GetBearerToken(HttpContext context)
         : null;
 }
 
+static bool HasRequiredBookerDetails(QuoteDraft draft)
+{
+    return draft.Booker is not null
+           && !string.IsNullOrWhiteSpace(draft.Booker.FirstName)
+           && !string.IsNullOrWhiteSpace(draft.Booker.LastName)
+           && !string.IsNullOrWhiteSpace(draft.Booker.EmailAddress)
+           && !string.IsNullOrWhiteSpace(draft.Booker.PhoneNumber);
+}
+
+// ===================================================================
+// BOOKER PROFILE ENDPOINTS
+// ===================================================================
+
+app.MapGet("/api/bookers", async ([FromQuery] int take, BookerProfileService service) =>
+{
+    var rows = await service.ListAsync(take);
+    return Results.Ok(rows);
+})
+.WithName("ListBookers")
+.RequireAuthorization("StaffOnly");
+
+app.MapGet("/api/bookers/me", async (HttpContext context, BookerProfileService service) =>
+{
+    var userId = GetUserId(context.User);
+    if (string.IsNullOrWhiteSpace(userId))
+        return Results.Unauthorized();
+
+    var profile = await service.GetByUserIdAsync(userId);
+    return profile is null ? Results.NotFound() : Results.Ok(profile);
+})
+.WithName("GetMyBookerProfile")
+.RequireAuthorization("BookerOrStaff");
+
+app.MapPut("/api/bookers/me", async ([FromBody] Passenger payload, HttpContext context, BookerProfileService service) =>
+{
+    var userId = GetUserId(context.User);
+    if (string.IsNullOrWhiteSpace(userId))
+        return Results.Unauthorized();
+
+    if (payload is null
+        || string.IsNullOrWhiteSpace(payload.FirstName)
+        || string.IsNullOrWhiteSpace(payload.LastName)
+        || string.IsNullOrWhiteSpace(payload.EmailAddress)
+        || string.IsNullOrWhiteSpace(payload.PhoneNumber))
+    {
+        return Results.BadRequest(new { error = "Booker firstName, lastName, emailAddress, and phoneNumber are required." });
+    }
+
+    var profile = await service.UpsertAsync(new BookerProfile
+    {
+        UserId = userId,
+        FirstName = payload.FirstName.Trim(),
+        LastName = payload.LastName.Trim(),
+        EmailAddress = payload.EmailAddress.Trim(),
+        PhoneNumber = payload.PhoneNumber.Trim()
+    });
+
+    return Results.Ok(profile);
+})
+.WithName("UpsertMyBookerProfile")
+.RequireAuthorization("BookerOrStaff");
+
+// Staff-only: upsert any booker profile by userId (admin/dispatcher)
+app.MapPut("/api/bookers/{userId}", async (
+    string userId,
+    [FromBody] BookerProfileUpsertRequest payload,
+    BookerProfileService service) =>
+{
+    if (!Guid.TryParse(userId, out _))
+        return Results.BadRequest(new { error = "userId must be a valid GUID." });
+
+    if (payload is null
+        || string.IsNullOrWhiteSpace(payload.FirstName)
+        || string.IsNullOrWhiteSpace(payload.LastName)
+        || string.IsNullOrWhiteSpace(payload.EmailAddress)
+        || string.IsNullOrWhiteSpace(payload.PhoneNumber))
+    {
+        return Results.BadRequest(new { error = "Booker firstName, lastName, emailAddress, and phoneNumber are required." });
+    }
+
+    var profile = await service.UpsertAsync(new BookerProfile
+    {
+        UserId = userId,
+        FirstName = payload.FirstName!.Trim(),
+        LastName = payload.LastName!.Trim(),
+        EmailAddress = payload.EmailAddress!.Trim(),
+        PhoneNumber = payload.PhoneNumber!.Trim()
+    });
+
+    return Results.Ok(profile);
+})
+.WithName("UpsertBookerProfileByStaff")
+.RequireAuthorization("StaffOnly");
+
 // ===================================================================
 // QUOTE ENDPOINTS
 // ===================================================================
@@ -357,8 +456,12 @@ static string? GetBearerToken(HttpContext context)
 // POST /quotes/seed - Seed sample quotes (DEV ONLY)
 app.MapPost("/quotes/seed", async (HttpContext context, IQuoteRepository repo, AuditLogger auditLogger) =>
 {
+    if (!app.Environment.IsDevelopment() &&
+        !app.Environment.EnvironmentName.Equals("Alpha", StringComparison.OrdinalIgnoreCase))
+        return Results.NotFound();
+
     var now = DateTime.UtcNow;
-    
+
     // Phase 1: Capture the authenticated user's ID for seed data
     var createdByUserId = GetUserId(context.User);
 
@@ -501,6 +604,7 @@ app.MapPost("/quotes", async (
     HttpContext context,
     INotificationPublisher notifications,
     IQuoteRepository repo,
+    BookerProfileService bookerService,
     AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
 {
@@ -509,8 +613,15 @@ app.MapPost("/quotes", async (
     if (draft is null || string.IsNullOrWhiteSpace(draft.PickupLocation))
         return Results.BadRequest(new { error = "Invalid payload" });
 
+    if (!HasRequiredBookerDetails(draft))
+        return Results.BadRequest(new { error = "Booker firstName, lastName, emailAddress, and phoneNumber are required for quote requests." });
+
     // Phase 1: Capture the user who created this quote for ownership tracking
     var currentUserId = GetUserId(context.User);
+    if (string.IsNullOrWhiteSpace(currentUserId))
+        return Results.Unauthorized();
+
+    await bookerService.SyncFromDraftAsync(currentUserId, draft.Booker);
 
     var rec = new QuoteRecord
     {
@@ -522,7 +633,7 @@ app.MapPost("/quotes", async (
         PickupDateTime = draft.PickupDateTime,
         Draft = draft,
         // Phase 1: Set ownership field (FIX: Use userId claim from JWT)
-        CreatedByUserId = context.User.FindFirst("userId")?.Value ?? currentUserId
+        CreatedByUserId = currentUserId
     };
 
     await repo.AddAsync(rec);
@@ -600,7 +711,7 @@ app.MapGet("/quotes/list", async ([FromQuery] int take, HttpContext context, IQu
     return Results.Ok(list);
 })
 .WithName("ListQuotes")
-.RequireAuthorization("StaffOnly"); // Phase 2: Changed from generic auth to StaffOnly
+.RequireAuthorization("BookerOrStaff");
 
 // GET /quotes/{id} - Get detailed quote by ID
 app.MapGet("/quotes/{id}", async (string id, HttpContext context, IQuoteRepository repo, AuditLogger auditLogger) =>
@@ -694,7 +805,7 @@ app.MapGet("/quotes/{id}", async (string id, HttpContext context, IQuoteReposito
     return Results.Ok(response);
 })
 .WithName("GetQuote")
-.RequireAuthorization("StaffOnly"); // Phase 2: Changed from generic auth to StaffOnly
+.RequireAuthorization("BookerOrStaff");
 
 // ===================================================================
 // PHASE ALPHA: QUOTE LIFECYCLE ENDPOINTS
@@ -1119,8 +1230,12 @@ app.MapPost("/quotes/{id}/cancel", async (
 // POST /bookings/seed - Seed sample bookings (DEV ONLY)
 app.MapPost("/bookings/seed", async (HttpContext context, IBookingRepository repo, AuditLogger auditLogger) =>
 {
+    if (!app.Environment.IsDevelopment() &&
+        !app.Environment.EnvironmentName.Equals("Alpha", StringComparison.OrdinalIgnoreCase))
+        return Results.NotFound();
+
     var now = DateTime.UtcNow;
-    
+
     // Phase 1: Capture the authenticated user's ID for seed data
     var createdByUserId = GetUserId(context.User);
 
@@ -1356,6 +1471,7 @@ app.MapPost("/bookings", async (
     HttpContext context,
     INotificationPublisher notifications,
     IBookingRepository repo,
+    BookerProfileService bookerService,
     AuditLogger auditLogger,
     ILoggerFactory loggerFactory) =>
 {
@@ -1364,8 +1480,15 @@ app.MapPost("/bookings", async (
     if (draft is null || string.IsNullOrWhiteSpace(draft.PickupLocation))
         return Results.BadRequest(new { error = "Invalid payload" });
 
+    if (!HasRequiredBookerDetails(draft))
+        return Results.BadRequest(new { error = "Booker firstName, lastName, emailAddress, and phoneNumber are required for booking requests." });
+
     // Phase 1: Capture the user who created this booking for ownership tracking
     var currentUserId = GetUserId(context.User);
+    if (string.IsNullOrWhiteSpace(currentUserId))
+        return Results.Unauthorized();
+
+    await bookerService.SyncFromDraftAsync(currentUserId, draft.Booker);
 
     var rec = new BookingRecord
     {
@@ -1501,7 +1624,7 @@ app.MapGet("/bookings/list", async ([FromQuery] int take, HttpContext context, I
     return Results.Ok(list);
 })
 .WithName("ListBookings")
-.RequireAuthorization("StaffOnly"); // Phase 2: Changed from generic auth to StaffOnly
+.RequireAuthorization("BookerOrStaff");
 
 // GET /bookings/{id} - Get detailed booking by ID
 app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepository repo, AuditLogger auditLogger) =>
@@ -1595,7 +1718,7 @@ app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepo
     return Results.Ok(response);
 })
 .WithName("GetBooking")
-.RequireAuthorization("StaffOnly"); // Phase 2: Changed from generic auth to StaffOnly
+.RequireAuthorization("BookerOrStaff");
 
 // ===================================================================
 // CANCEL ENDPOINTS
