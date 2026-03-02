@@ -51,5 +51,17 @@ namespace Bellwood.AdminApi.Services
             _logger.LogInformation("Publishing notification event {EventName} for quote {QuoteId} and booking {BookingId}", "QuoteAccepted", quote.Id, bookingId);
             return _emailSender.SendQuoteAcceptedAsync(quote, bookingId);
         }
+
+        public Task PublishBookingConfirmedAsync(BookingRecord booking, string messageToPassenger)
+        {
+            _logger.LogInformation("Publishing notification event {EventName} for booking {BookingId}", "BookingConfirmed", booking.Id);
+            return _emailSender.SendBookingConfirmationAsync(booking, messageToPassenger);
+        }
+
+        public Task PublishBookingReceivedAsync(BookingRecord booking)
+        {
+            _logger.LogInformation("Publishing notification event {EventName} for booking {BookingId}", "BookingReceived", booking.Id);
+            return _emailSender.SendBookingReceivedAsync(booking);
+        }
     }
 }

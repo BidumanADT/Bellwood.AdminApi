@@ -179,6 +179,8 @@ public static class AuditActions
     public const string BookingCreated = "Booking.Created";
     public const string BookingViewed = "Booking.Viewed";
     public const string BookingUpdated = "Booking.Updated";
+    public const string BookingReceived = "Booking.Received";
+    public const string BookingConfirmed = "Booking.Confirmed";
     public const string BookingCancelled = "Booking.Cancelled";
     public const string BookingDeleted = "Booking.Deleted";
 
