@@ -14,5 +14,12 @@ namespace Bellwood.AdminApi.Services
         // Phase Alpha quote lifecycle events
         Task PublishQuoteResponseAsync(QuoteRecord quote);
         Task PublishQuoteAcceptedAsync(QuoteRecord quote, string bookingId);
+        Task PublishBookingConfirmedAsync(BookingRecord booking, string messageToPassenger);
+
+        /// <summary>
+        /// Sends the "We received your request" email when staff acknowledges a booking.
+        /// This is email #1 of 2 in the customer-facing workflow.
+        /// </summary>
+        Task PublishBookingReceivedAsync(BookingRecord booking);
     }
 }

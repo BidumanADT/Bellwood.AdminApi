@@ -642,6 +642,121 @@ Bellwood Elite Team"
     }
 
     // ===================================================================
+    // BOOKING CONFIRMATION EMAIL TO BOOKER
+    // ===================================================================
+
+    public async Task SendBookingConfirmationAsync(BookingRecord booking, string messageToPassenger)
+    {
+        var bookerEmail = booking.Draft?.Booker?.EmailAddress;
+        var msg = BuildMessage("Booking.Confirmed", booking.Id, bookerEmail ?? _opt.To);
+        if (msg is null) return;
+
+        msg.Subject = BuildSubject(
+            $"Your Bellwood Reservation Has Been Received — Booking {booking.Id}",
+            bookerEmail);
+
+        string H(string? s) => WebUtility.HtmlEncode(s ?? "");
+
+        var builder = new BodyBuilder
+        {
+            HtmlBody = $@"
+                <h3 style=""color:#CBA135"">Bellwood Elite — Reservation Received</h3>
+                <p>{H(messageToPassenger)}</p>
+                <hr/>
+                <h4>Booking Details</h4>
+                <p><b>Reference ID:</b> {H(booking.Id)}</p>
+                <p><b>Passenger:</b> {H(booking.PassengerName)}</p>
+                <p><b>Vehicle Class:</b> {H(booking.VehicleClass)}</p>
+                <p><b>Pickup:</b> {booking.PickupDateTime:G} at {H(booking.PickupLocation)}</p>
+                <p><b>Dropoff:</b> {H(booking.DropoffLocation ?? "As Directed")}</p>
+                <hr/>
+                <p>Thank you for choosing Bellwood Elite!</p>
+                <p>Best regards,<br/>Bellwood Elite Team</p>",
+
+            TextBody = $@"Bellwood Elite — Reservation Received
+
+{messageToPassenger}
+
+----------------------------------------
+Booking Details
+----------------------------------------
+Reference ID: {booking.Id}
+Passenger: {booking.PassengerName}
+Vehicle Class: {booking.VehicleClass}
+Pickup: {booking.PickupDateTime:G} at {booking.PickupLocation}
+Dropoff: {booking.DropoffLocation ?? "As Directed"}
+
+Thank you for choosing Bellwood Elite!
+
+Best regards,
+Bellwood Elite Team"
+        };
+
+        msg.Body = builder.ToMessageBody();
+        await SendEmailAsync(msg);
+    }
+
+    // ===================================================================
+    // BOOKING RECEIVED EMAIL TO BOOKER
+    // ===================================================================
+
+    public async Task SendBookingReceivedAsync(BookingRecord booking)
+    {
+        var bookerEmail = booking.Draft?.Booker?.EmailAddress;
+        var msg = BuildMessage("Booking.Received", booking.Id, bookerEmail ?? _opt.To);
+        if (msg is null) return;
+
+        msg.Subject = BuildSubject(
+            $"Your Request Has Been Received — Bellwood Elite Booking {booking.Id}",
+            bookerEmail);
+
+        string H(string? s) => WebUtility.HtmlEncode(s ?? "");
+
+        var builder = new BodyBuilder
+        {
+            HtmlBody = $@"
+                <h3 style=""color:#CBA135"">Bellwood Elite — Request Received</h3>
+                <p>Hello {H(booking.Draft?.Booker?.FirstName ?? booking.BookerName)},</p>
+                <p>Thank you for your reservation request. We have received it and our team is reviewing 
+                   the details. You will receive a separate confirmation once your reservation has been finalized.</p>
+                <hr/>
+                <h4>Request Details</h4>
+                <p><b>Reference ID:</b> {H(booking.Id)}</p>
+                <p><b>Passenger:</b> {H(booking.PassengerName)}</p>
+                <p><b>Vehicle Class:</b> {H(booking.VehicleClass)}</p>
+                <p><b>Pickup:</b> {booking.PickupDateTime:G} at {H(booking.PickupLocation)}</p>
+                <p><b>Dropoff:</b> {H(booking.DropoffLocation ?? "As Directed")}</p>
+                <hr/>
+                <p>If you have any questions, please don't hesitate to contact us.</p>
+                <p>Best regards,<br/>Bellwood Elite Team</p>",
+
+            TextBody = $@"Bellwood Elite — Request Received
+
+Hello {booking.Draft?.Booker?.FirstName ?? booking.BookerName},
+
+Thank you for your reservation request. We have received it and our team is reviewing 
+the details. You will receive a separate confirmation once your reservation has been finalized.
+
+----------------------------------------
+Request Details
+----------------------------------------
+Reference ID: {booking.Id}
+Passenger: {booking.PassengerName}
+Vehicle Class: {booking.VehicleClass}
+Pickup: {booking.PickupDateTime:G} at {booking.PickupLocation}
+Dropoff: {booking.DropoffLocation ?? "As Directed"}
+
+If you have any questions, please don't hesitate to contact us.
+
+Best regards,
+Bellwood Elite Team"
+        };
+
+        msg.Body = builder.ToMessageBody();
+        await SendEmailAsync(msg);
+    }
+
+    // ===================================================================
     // EMAIL CONTEXT HELPER CLASS
     // ===================================================================
 

@@ -5,13 +5,14 @@
 /// </summary>
 public enum BookingStatus
 {
-    Requested = 0,   // Initial state from mobile app
-    Confirmed = 1,   // Bellwood staff approved
-    Scheduled = 2,   // Driver/vehicle assigned
-    InProgress = 3,  // Ride started
-    Completed = 4,   // Ride finished
-    Cancelled = 5,   // User or staff cancelled
-    NoShow = 6       // Passenger didn't show up
+    Requested = 0,   // Submitted by customer — internal only, no customer email yet
+    Received = 1,    // Staff acknowledged receipt — "We received your request" email sent
+    Confirmed = 2,   // Staff fully confirmed — "Your reservation is confirmed" email sent
+    Scheduled = 3,   // Driver/vehicle assigned
+    InProgress = 4,  // Ride started
+    Completed = 5,   // Ride finished
+    Cancelled = 6,   // User or staff cancelled
+    NoShow = 7       // Passenger didn't show up
 }
 
 /// <summary>
@@ -60,6 +61,40 @@ public sealed class BookingRecord
     /// Populated on updates for audit trail purposes.
     /// </summary>
     public DateTime? ModifiedOnUtc { get; set; }
+
+    // =====================================================================
+    // CONFIRMATION FIELDS
+    // =====================================================================
+    
+    /// <summary>
+    /// UTC timestamp when receipt of booking was acknowledged by staff.
+    /// Populated by POST /bookings/{id}/receive.
+    /// </summary>
+    public DateTime? ReceivedAt { get; set; }
+
+    /// <summary>
+    /// UserId of the staff member who acknowledged receipt.
+    /// Populated by POST /bookings/{id}/receive.
+    /// </summary>
+    public string? ReceivedByUserId { get; set; }
+
+    /// <summary>
+    /// UTC timestamp when booking was confirmed by staff.
+    /// Populated by POST /bookings/{id}/confirm.
+    /// </summary>
+    public DateTime? ConfirmedAt { get; set; }
+    
+    /// <summary>
+    /// UserId of the staff member who confirmed the booking.
+    /// Populated by POST /bookings/{id}/confirm.
+    /// </summary>
+    public string? ConfirmedByUserId { get; set; }
+    
+    /// <summary>
+    /// Internal staff notes recorded during confirmation.
+    /// Never surfaced to bookers or passengers. Max 1000 chars.
+    /// </summary>
+    public string? ConfirmationNotes { get; set; }
 
     // =====================================================================
     // PHASE ALPHA: QUOTE-TO-BOOKING LINK

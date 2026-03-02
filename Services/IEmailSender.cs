@@ -14,5 +14,14 @@ namespace Bellwood.AdminApi.Services
         // Phase Alpha: Quote lifecycle email notifications
         Task SendQuoteResponseAsync(QuoteRecord quote);
         Task SendQuoteAcceptedAsync(QuoteRecord quote, string bookingId);
+
+        // Booking confirmation email to booker
+        Task SendBookingConfirmationAsync(BookingRecord booking, string messageToPassenger);
+
+        /// <summary>
+        /// "We received your request" email — sent when staff acknowledges a booking.
+        /// No commitment implied. Purely a receipt acknowledgment.
+        /// </summary>
+        Task SendBookingReceivedAsync(BookingRecord booking);
     }
 }

@@ -150,7 +150,7 @@ public sealed class FileBookingRepository : IBookingRepository
             rec.AssignedDriverName = driverName;
 
             // Normalize status if still in requested/confirmed
-            if (rec.Status == BookingStatus.Requested || rec.Status == BookingStatus.Confirmed)
+            if (rec.Status == BookingStatus.Requested || rec.Status == BookingStatus.Received || rec.Status == BookingStatus.Confirmed)
             {
                 rec.Status = BookingStatus.Scheduled;
             }
@@ -160,6 +160,49 @@ public sealed class FileBookingRepository : IBookingRepository
             {
                 rec.CurrentRideStatus = RideStatus.Scheduled;
             }
+
+            await WriteAllAsync(list);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task UpdateConfirmationAsync(string id, string? confirmedByUserId, DateTime confirmedAtUtc, string? confirmationNotes, CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync();
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var list = await ReadAllAsync();
+            var rec = list.FirstOrDefault(x => x.Id == id);
+            if (rec is null) return;
+
+            rec.Status = BookingStatus.Confirmed;
+            rec.ConfirmedAt = confirmedAtUtc;
+            rec.ConfirmedByUserId = confirmedByUserId;
+            rec.ConfirmationNotes = confirmationNotes;
+            rec.ModifiedByUserId = confirmedByUserId;
+            rec.ModifiedOnUtc = confirmedAtUtc;
+
+            await WriteAllAsync(list);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task UpdateReceiptAsync(string id, string? receivedByUserId, DateTime receivedAtUtc, CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync();
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var list = await ReadAllAsync();
+            var rec = list.FirstOrDefault(x => x.Id == id);
+            if (rec is null) return;
+
+            rec.Status = BookingStatus.Received;
+            rec.ReceivedAt = receivedAtUtc;
+            rec.ReceivedByUserId = receivedByUserId;
+            rec.ModifiedByUserId = receivedByUserId;
+            rec.ModifiedOnUtc = receivedAtUtc;
 
             await WriteAllAsync(list);
         }

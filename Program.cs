@@ -1766,7 +1766,7 @@ app.MapPost("/bookings/{id}/cancel", async (
     }
 
     // Only allow cancellation if status is Requested or Confirmed
-    if (booking.Status != BookingStatus.Requested && booking.Status != BookingStatus.Confirmed)
+    if (booking.Status != BookingStatus.Requested && booking.Status != BookingStatus.Received && booking.Status != BookingStatus.Confirmed)
     {
         // Phase 3: Audit failed cancellation (invalid status)
         await auditLogger.LogFailureAsync(
@@ -1813,6 +1813,190 @@ app.MapPost("/bookings/{id}/cancel", async (
 })
 .WithName("CancelBooking")
 .RequireAuthorization();
+
+// POST /bookings/{id}/receive - Staff acknowledges receipt, sends "request received" email to booker
+app.MapPost("/bookings/{id}/receive", async (
+    string id,
+    HttpContext context,
+    IBookingRepository repo,
+    INotificationPublisher notifications,
+    AuditLogger auditLogger,
+    ILoggerFactory loggerFactory) =>
+{
+    var log = loggerFactory.CreateLogger("bookings");
+    var user = context.User;
+    var currentUserId = GetUserId(user);
+
+    var booking = await repo.GetAsync(id);
+    if (booking is null)
+        return Results.NotFound(new { error = $"Booking with ID '{id}' not found" });
+
+    // FSM validation: only Requested ? Received
+    if (booking.Status != BookingStatus.Requested)
+    {
+        await auditLogger.LogFailureAsync(
+            user,
+            AuditActions.BookingReceived,
+            "Booking",
+            id,
+            errorMessage: $"Can only acknowledge receipt of bookings with status 'Requested'. Current status: {booking.Status}",
+            httpContext: context);
+
+        return Results.BadRequest(new { error = $"Can only acknowledge receipt of bookings with status 'Requested'. Current status: {booking.Status}" });
+    }
+
+    var nowUtc = DateTime.UtcNow;
+    await repo.UpdateReceiptAsync(id, currentUserId, nowUtc);
+
+    booking.Status = BookingStatus.Received;
+    booking.ReceivedAt = nowUtc;
+    booking.ReceivedByUserId = currentUserId;
+
+    try
+    {
+        await notifications.PublishBookingReceivedAsync(booking);
+        log.LogInformation("Booking {Id} receipt acknowledged by {UserId}, receipt email sent to booker", id, currentUserId);
+    }
+    catch (Exception ex)
+    {
+        log.LogError(ex, "Failed to send receipt email for booking {Id}", id);
+        // Booking is marked Received even if email fails
+    }
+
+    await auditLogger.LogSuccessAsync(
+        user,
+        AuditActions.BookingReceived,
+        "Booking",
+        id,
+        details: new
+        {
+            receivedAt = nowUtc,
+            receivedBy = currentUserId,
+            passengerName = booking.PassengerName,
+            bookerEmail = booking.Draft?.Booker?.EmailAddress
+        },
+        httpContext: context);
+
+    log.LogInformation("Booking {Id} receipt acknowledged by {UserId} for passenger {Passenger}",
+        id, currentUserId, booking.PassengerName);
+
+    return Results.Ok(new
+    {
+        success = true,
+        booking = new
+        {
+            id = booking.Id,
+            status = "Received",
+            receivedAt = nowUtc,
+            receivedByUserId = currentUserId
+        }
+    });
+})
+.WithName("AcknowledgeBookingReceipt")
+.RequireAuthorization("StaffOnly");
+
+// POST /bookings/{id}/confirm - Staff confirms a booking and notifies booker
+app.MapPost("/bookings/{id}/confirm", async (
+    string id,
+    [FromBody] ConfirmBookingRequest request,
+    HttpContext context,
+    IBookingRepository repo,
+    INotificationPublisher notifications,
+    AuditLogger auditLogger,
+    ILoggerFactory loggerFactory) =>
+{
+    var log = loggerFactory.CreateLogger("bookings");
+    var user = context.User;
+    var currentUserId = GetUserId(user);
+
+    // Validate request payload
+    if (request is null || string.IsNullOrWhiteSpace(request.MessageToPassenger))
+        return Results.BadRequest(new { error = "messageToPassenger is required" });
+
+    if (request.MessageToPassenger.Length > 2000)
+        return Results.BadRequest(new { error = "messageToPassenger must not exceed 2000 characters" });
+
+    if (request.Notes is not null && request.Notes.Length > 1000)
+        return Results.BadRequest(new { error = "notes must not exceed 1000 characters" });
+
+    // Find booking
+    var booking = await repo.GetAsync(id);
+    if (booking is null)
+        return Results.NotFound(new { error = $"Booking with ID '{id}' not found" });
+
+    // FSM validation: only Received ? Confirmed
+    if (booking.Status != BookingStatus.Received)
+    {
+        await auditLogger.LogFailureAsync(
+            user,
+            AuditActions.BookingConfirmed,
+            "Booking",
+            id,
+            errorMessage: $"Can only confirm bookings with status 'Requested'. Current status: {booking.Status}",
+            httpContext: context);
+
+        return Results.BadRequest(new { error = $"Can only confirm bookings with status 'Requested'. Current status: {booking.Status}" });
+    }
+
+    var nowUtc = DateTime.UtcNow;
+
+    // Persist confirmation fields atomically
+    var confirmationNotes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim();
+    await repo.UpdateConfirmationAsync(id, currentUserId, nowUtc, confirmationNotes);
+
+    // Update in-memory object for email and response
+    booking.Status = BookingStatus.Confirmed;
+    booking.ConfirmedAt = nowUtc;
+    booking.ConfirmedByUserId = currentUserId;
+    booking.ModifiedByUserId = currentUserId;
+    booking.ModifiedOnUtc = nowUtc;
+    booking.ConfirmationNotes = confirmationNotes;
+
+    // Send email notification to booker
+    try
+    {
+        await notifications.PublishBookingConfirmedAsync(booking, request.MessageToPassenger);
+        log.LogInformation("Booking {Id} confirmed by {UserId}, confirmation email sent to booker", id, currentUserId);
+    }
+    catch (Exception ex)
+    {
+        log.LogError(ex, "Failed to send confirmation email for booking {Id}", id);
+        // Booking is confirmed even if email fails
+    }
+
+    // Audit log
+    await auditLogger.LogSuccessAsync(
+        user,
+        AuditActions.BookingConfirmed,
+        "Booking",
+        id,
+        details: new
+        {
+            confirmedAt = nowUtc,
+            confirmedBy = currentUserId,
+            hasNotes = !string.IsNullOrWhiteSpace(request.Notes),
+            passengerName = booking.PassengerName,
+            bookerEmail = booking.Draft?.Booker?.EmailAddress
+        },
+        httpContext: context);
+
+    log.LogInformation("Booking {Id} confirmed by {UserId} for passenger {Passenger}",
+        id, currentUserId, booking.PassengerName);
+
+    return Results.Ok(new
+    {
+        success = true,
+        booking = new
+        {
+            id = booking.Id,
+            status = "Confirmed",
+            confirmedAt = nowUtc,
+            confirmedByUserId = currentUserId
+        }
+    });
+})
+.WithName("ConfirmBooking")
+.RequireAuthorization("StaffOnly");
 
 // ===================================================================
 // DRIVER ENDPOINTS
@@ -3670,6 +3854,16 @@ app.Run();
 /// </summary>
 /// <param name="Confirm">Must be exactly "CLEAR" (case-sensitive)</param>
 public record ClearAuditLogsRequest(string Confirm);
+
+/// <summary>
+/// Request DTO for POST /bookings/{id}/confirm.
+/// Staff confirms a booking and sends a notification to the booker.
+/// </summary>
+public sealed class ConfirmBookingRequest
+{
+    public string MessageToPassenger { get; set; } = string.Empty;
+    public string? Notes { get; set; }
+}
 
 // ===================================================================
 // END OF FILE

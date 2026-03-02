@@ -1,0 +1,80 @@
+[
+  {
+    "Id": "597c390d095447ae93e15a8d85f1f265",
+    "CreatedUtc": "2026-03-02T15:17:50.3405266Z",
+    "Status": "Cancelled",
+    "CancelledAt": null,
+    "CreatedByUserId": "d165199b-bfa1-47d6-8066-1ec3ddc274a5",
+    "ModifiedByUserId": "d165199b-bfa1-47d6-8066-1ec3ddc274a5",
+    "ModifiedOnUtc": "2026-03-02T17:09:18.9698347Z",
+    "ConfirmedAt": "2026-03-02T17:06:25.3224948Z",
+    "ConfirmedByUserId": "a827ebe4-4ada-429c-9db7-be64339dac8c",
+    "ConfirmationNotes": null,
+    "SourceQuoteId": null,
+    "AssignedDriverId": null,
+    "AssignedDriverUid": null,
+    "AssignedDriverName": null,
+    "CurrentRideStatus": null,
+    "BookerName": "Aaron AlphaTest3",
+    "PassengerName": "AlphaTest NewPax1",
+    "VehicleClass": "Sedan",
+    "PickupLocation": "Chicago Midway International Airport - 5700 S Cicero Ave, Chicago, IL 60638, USA",
+    "DropoffLocation": "Metea Valley High School - 1801 N Eola Rd, Aurora, IL 60502, USA",
+    "PickupDateTime": "2026-03-03T09:00:00",
+    "Draft": {
+      "Booker": {
+        "FirstName": "Aaron",
+        "LastName": "AlphaTest3",
+        "PhoneNumber": "1112223333",
+        "EmailAddress": "ADT3@fakemail.com"
+      },
+      "Passenger": {
+        "FirstName": "AlphaTest",
+        "LastName": "NewPax1",
+        "PhoneNumber": "",
+        "EmailAddress": ""
+      },
+      "AdditionalPassengers": [
+        "AddPax Test1"
+      ],
+      "VehicleClass": "Sedan",
+      "PickupDateTime": "2026-03-03T09:00:00",
+      "PickupLocation": "Chicago Midway International Airport - 5700 S Cicero Ave, Chicago, IL 60638, USA",
+      "PickupStyle": "Curbside",
+      "PickupSignText": null,
+      "ReturnPickupStyle": "Curbside",
+      "ReturnPickupSignText": null,
+      "AsDirected": false,
+      "Hours": null,
+      "DropoffLocation": "Metea Valley High School - 1801 N Eola Rd, Aurora, IL 60502, USA",
+      "RoundTrip": true,
+      "ReturnPickupTime": "2026-03-05T11:00:00",
+      "OutboundFlight": {
+        "FlightNumber": "WN1234",
+        "TailNumber": null
+      },
+      "ReturnFlight": {
+        "FlightNumber": "TBD",
+        "TailNumber": null
+      },
+      "PassengerCount": 2,
+      "CheckedBags": 0,
+      "CarryOnBags": 0,
+      "CapacityWithinLimits": true,
+      "CapacityNote": null,
+      "SuggestedVehicle": null,
+      "CapacityOverrideByUser": false,
+      "AdditionalRequest": null,
+      "AdditionalRequestOtherText": null,
+      "PaymentMethodId": "pm_visa4242",
+      "PaymentMethodLast4": "4242"
+    },
+    "PaymentMethodIdEncrypted": null,
+    "PaymentMethodLast4": null,
+    "PaymentMethodType": null,
+    "TotalAmountCents": null,
+    "TotalFareCents": null,
+    "CurrencyCode": null,
+    "BillingNotesEncrypted": null
+  }
+]

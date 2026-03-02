@@ -47,5 +47,17 @@ namespace Bellwood.AdminApi.Services
             _logger.LogDebug("[Email/NoOp] Skipping quote accepted email for {QuoteId} (booking {BookingId}).", quote.Id, bookingId);
             return Task.CompletedTask;
         }
+
+        public Task SendBookingConfirmationAsync(BookingRecord booking, string messageToPassenger)
+        {
+            _logger.LogDebug("[Email/NoOp] Skipping booking confirmation email for {BookingId}.", booking.Id);
+            return Task.CompletedTask;
+        }
+
+        public Task SendBookingReceivedAsync(BookingRecord booking)
+        {
+            _logger.LogDebug("[Email/NoOp] Skipping booking received email for {BookingId}.", booking.Id);
+            return Task.CompletedTask;
+        }
     }
 }

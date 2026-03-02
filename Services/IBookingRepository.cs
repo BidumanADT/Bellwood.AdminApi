@@ -22,5 +22,17 @@ namespace Bellwood.AdminApi.Services
         /// This ensures CurrentRideStatus is persisted to storage.
         /// </summary>
         Task UpdateRideStatusAsync(string id, RideStatus rideStatus, BookingStatus bookingStatus, CancellationToken ct = default);
+
+        /// <summary>
+        /// Persist booking confirmation fields: Status → Confirmed, plus
+        /// ConfirmedAt, ConfirmedByUserId, ConfirmationNotes, and audit trail.
+        /// </summary>
+        Task UpdateConfirmationAsync(string id, string? confirmedByUserId, DateTime confirmedAtUtc, string? confirmationNotes, CancellationToken ct = default);
+
+        /// <summary>
+        /// Persist receipt acknowledgment: Status → Received, plus
+        /// ReceivedAt, ReceivedByUserId, and audit trail.
+        /// </summary>
+        Task UpdateReceiptAsync(string id, string? receivedByUserId, DateTime receivedAtUtc, CancellationToken ct = default);
     }
 }

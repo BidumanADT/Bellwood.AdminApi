@@ -37,5 +37,11 @@ namespace Bellwood.AdminApi.Services
 
         public Task SendQuoteAcceptedAsync(QuoteRecord quote, string bookingId)
             => _inner.SendQuoteAcceptedAsync(quote, bookingId);
+
+        public Task SendBookingConfirmationAsync(BookingRecord booking, string messageToPassenger)
+            => _inner.SendBookingConfirmationAsync(booking, messageToPassenger);
+
+        public Task SendBookingReceivedAsync(BookingRecord booking)
+            => _inner.SendBookingReceivedAsync(booking);
     }
 }
