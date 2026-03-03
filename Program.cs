@@ -76,6 +76,8 @@ builder.Services.AddSingleton<IAffiliateRepository, FileAffiliateRepository>();
 builder.Services.AddSingleton<IDriverRepository, FileDriverRepository>();
 builder.Services.AddSingleton<IBookerRepository, FileBookerRepository>();
 builder.Services.AddSingleton<BookerProfileService>();
+builder.Services.AddSingleton<ISavedPassengerRepository, FileSavedPassengerRepository>();
+builder.Services.AddSingleton<ISavedLocationRepository, FileSavedLocationRepository>();
 
 // Phase 3: Audit log repository and logger service
 builder.Services.AddSingleton<IAuditLogRepository, FileAuditLogRepository>();
@@ -448,6 +450,285 @@ app.MapPut("/api/bookers/{userId}", async (
 })
 .WithName("UpsertBookerProfileByStaff")
 .RequireAuthorization("StaffOnly");
+
+// ===================================================================
+// PROFILE ENDPOINTS
+// ===================================================================
+
+// GET /profile - current user's booker profile
+app.MapGet("/profile", async (HttpContext context, BookerProfileService service) =>
+{
+    var userId = GetUserId(context.User);
+    if (string.IsNullOrWhiteSpace(userId))
+        return Results.Unauthorized();
+
+    var profile = await service.GetByUserIdAsync(userId);
+    return profile is null ? Results.NotFound() : Results.Ok(profile);
+})
+.WithName("GetMyProfile")
+.RequireAuthorization("BookerOrStaff");
+
+// PUT /profile - update current user's booker profile
+app.MapPut("/profile", async ([FromBody] Passenger payload, HttpContext context, BookerProfileService service) =>
+{
+    var userId = GetUserId(context.User);
+    if (string.IsNullOrWhiteSpace(userId))
+        return Results.Unauthorized();
+
+    var profile = await service.UpsertAsync(new BookerProfile
+    {
+        UserId       = userId,
+        FirstName    = payload.FirstName.Trim(),
+        LastName     = payload.LastName.Trim(),
+        PhoneNumber  = string.IsNullOrWhiteSpace(payload.PhoneNumber)  ? null : payload.PhoneNumber.Trim(),
+        EmailAddress = string.IsNullOrWhiteSpace(payload.EmailAddress) ? null : payload.EmailAddress.Trim()
+    });
+
+    return Results.Ok(profile);
+})
+.WithName("UpdateMyProfile")
+.RequireAuthorization("BookerOrStaff");
+
+// GET /profile/passengers - list saved passengers
+app.MapGet("/profile/passengers", async (
+    [FromQuery] string? userId,
+    HttpContext context,
+    ISavedPassengerRepository repo) =>
+{
+    var callerId = GetUserId(context.User);
+    if (string.IsNullOrWhiteSpace(callerId))
+        return Results.Unauthorized();
+
+    var targetId = IsStaffOrAdmin(context.User) && !string.IsNullOrWhiteSpace(userId)
+        ? userId
+        : callerId;
+
+    var passengers = await repo.ListAsync(targetId);
+    return Results.Ok(passengers);
+})
+.WithName("ListSavedPassengers")
+.RequireAuthorization("BookerOrStaff");
+
+// POST /profile/passengers - create a saved passenger
+app.MapPost("/profile/passengers", async (
+    [FromBody] Passenger payload,
+    HttpContext context,
+    ISavedPassengerRepository repo) =>
+{
+    var callerId = GetUserId(context.User);
+    if (string.IsNullOrWhiteSpace(callerId))
+        return Results.Unauthorized();
+
+    var passenger = new SavedPassenger
+    {
+        UserId       = callerId,
+        FirstName    = payload.FirstName.Trim(),
+        LastName     = payload.LastName.Trim(),
+        PhoneNumber  = string.IsNullOrWhiteSpace(payload.PhoneNumber)  ? null : payload.PhoneNumber.Trim(),
+        EmailAddress = string.IsNullOrWhiteSpace(payload.EmailAddress) ? null : payload.EmailAddress.Trim()
+    };
+
+    var created = await repo.AddAsync(passenger);
+    return Results.Created($"/profile/passengers/{created.Id}", created);
+})
+.WithName("CreateSavedPassenger")
+.RequireAuthorization("BookerOrStaff");
+
+// PUT /profile/passengers/{id} - update a saved passenger
+// Staff can target another user's record by supplying ?userId=<target>
+app.MapPut("/profile/passengers/{id}", async (
+    string id,
+    [FromQuery] string? userId,
+    [FromBody] Passenger payload,
+    HttpContext context,
+    ISavedPassengerRepository repo) =>
+{
+    if (!Guid.TryParse(id, out var guid))
+        return Results.BadRequest(new { error = "id must be a valid GUID." });
+
+    var callerId = GetUserId(context.User);
+    if (string.IsNullOrWhiteSpace(callerId))
+        return Results.Unauthorized();
+
+    var targetId = IsStaffOrAdmin(context.User) && !string.IsNullOrWhiteSpace(userId)
+        ? userId
+        : callerId;
+
+    var record = await repo.GetAsync(targetId, guid);
+    if (record is null)
+        return Results.NotFound();
+
+    if (!CanAccessRecord(context.User, record.UserId))
+        return Results.Forbid();
+
+    var updated = await repo.UpdateAsync(new SavedPassenger
+    {
+        Id           = guid,
+        UserId       = record.UserId,
+        FirstName    = payload.FirstName.Trim(),
+        LastName     = payload.LastName.Trim(),
+        PhoneNumber  = string.IsNullOrWhiteSpace(payload.PhoneNumber)  ? null : payload.PhoneNumber.Trim(),
+        EmailAddress = string.IsNullOrWhiteSpace(payload.EmailAddress) ? null : payload.EmailAddress.Trim()
+    });
+
+    return updated is null ? Results.NotFound() : Results.Ok(updated);
+})
+.WithName("UpdateSavedPassenger")
+.RequireAuthorization("BookerOrStaff");
+
+// DELETE /profile/passengers/{id} - delete a saved passenger
+// Staff can target another user's record by supplying ?userId=<target>
+app.MapDelete("/profile/passengers/{id}", async (
+    string id,
+    [FromQuery] string? userId,
+    HttpContext context,
+    ISavedPassengerRepository repo) =>
+{
+    if (!Guid.TryParse(id, out var guid))
+        return Results.BadRequest(new { error = "id must be a valid GUID." });
+
+    var callerId = GetUserId(context.User);
+    if (string.IsNullOrWhiteSpace(callerId))
+        return Results.Unauthorized();
+
+    var targetId = IsStaffOrAdmin(context.User) && !string.IsNullOrWhiteSpace(userId)
+        ? userId
+        : callerId;
+
+    var record = await repo.GetAsync(targetId, guid);
+    if (record is null)
+        return Results.NotFound();
+
+    if (!CanAccessRecord(context.User, record.UserId))
+        return Results.Forbid();
+
+    var deleted = await repo.DeleteAsync(record.UserId, guid);
+    return deleted ? Results.NoContent() : Results.NotFound();
+})
+.WithName("DeleteSavedPassenger")
+.RequireAuthorization("BookerOrStaff");
+
+// GET /profile/locations - list saved locations
+app.MapGet("/profile/locations", async (
+    [FromQuery] string? userId,
+    HttpContext context,
+    ISavedLocationRepository repo) =>
+{
+    var callerId = GetUserId(context.User);
+    if (string.IsNullOrWhiteSpace(callerId))
+        return Results.Unauthorized();
+
+    var targetId = IsStaffOrAdmin(context.User) && !string.IsNullOrWhiteSpace(userId)
+        ? userId
+        : callerId;
+
+    var locations = await repo.ListAsync(targetId);
+    return Results.Ok(locations);
+})
+.WithName("ListSavedLocations")
+.RequireAuthorization("BookerOrStaff");
+
+// POST /profile/locations - create a saved location
+app.MapPost("/profile/locations", async (
+    [FromBody] SavedLocationRequest payload,
+    HttpContext context,
+    ISavedLocationRepository repo) =>
+{
+    var callerId = GetUserId(context.User);
+    if (string.IsNullOrWhiteSpace(callerId))
+        return Results.Unauthorized();
+
+    var location = new SavedLocation
+    {
+        UserId     = callerId,
+        Label      = payload.Label.Trim(),
+        Address    = payload.Address.Trim(),
+        Latitude   = payload.Latitude,
+        Longitude  = payload.Longitude,
+        IsFavorite = payload.IsFavorite
+    };
+
+    var created = await repo.AddAsync(location);
+    return Results.Created($"/profile/locations/{created.Id}", created);
+})
+.WithName("CreateSavedLocation")
+.RequireAuthorization("BookerOrStaff");
+
+// PUT /profile/locations/{id} - update a saved location
+// Staff can target another user's record by supplying ?userId=<target>
+app.MapPut("/profile/locations/{id}", async (
+    string id,
+    [FromQuery] string? userId,
+    [FromBody] SavedLocationRequest payload,
+    HttpContext context,
+    ISavedLocationRepository repo) =>
+{
+    if (!Guid.TryParse(id, out var guid))
+        return Results.BadRequest(new { error = "id must be a valid GUID." });
+
+    var callerId = GetUserId(context.User);
+    if (string.IsNullOrWhiteSpace(callerId))
+        return Results.Unauthorized();
+
+    var targetId = IsStaffOrAdmin(context.User) && !string.IsNullOrWhiteSpace(userId)
+        ? userId
+        : callerId;
+
+    var record = await repo.GetAsync(targetId, guid);
+    if (record is null)
+        return Results.NotFound();
+
+    if (!CanAccessRecord(context.User, record.UserId))
+        return Results.Forbid();
+
+    var updated = await repo.UpdateAsync(new SavedLocation
+    {
+        Id         = guid,
+        UserId     = record.UserId,
+        Label      = payload.Label.Trim(),
+        Address    = payload.Address.Trim(),
+        Latitude   = payload.Latitude,
+        Longitude  = payload.Longitude,
+        IsFavorite = payload.IsFavorite,
+        UseCount   = record.UseCount
+    });
+
+    return updated is null ? Results.NotFound() : Results.Ok(updated);
+})
+.WithName("UpdateSavedLocation")
+.RequireAuthorization("BookerOrStaff");
+
+// DELETE /profile/locations/{id} - delete a saved location
+// Staff can target another user's record by supplying ?userId=<target>
+app.MapDelete("/profile/locations/{id}", async (
+    string id,
+    [FromQuery] string? userId,
+    HttpContext context,
+    ISavedLocationRepository repo) =>
+{
+    if (!Guid.TryParse(id, out var guid))
+        return Results.BadRequest(new { error = "id must be a valid GUID." });
+
+    var callerId = GetUserId(context.User);
+    if (string.IsNullOrWhiteSpace(callerId))
+        return Results.Unauthorized();
+
+    var targetId = IsStaffOrAdmin(context.User) && !string.IsNullOrWhiteSpace(userId)
+        ? userId
+        : callerId;
+
+    var record = await repo.GetAsync(targetId, guid);
+    if (record is null)
+        return Results.NotFound();
+
+    if (!CanAccessRecord(context.User, record.UserId))
+        return Results.Forbid();
+
+    var deleted = await repo.DeleteAsync(record.UserId, guid);
+    return deleted ? Results.NoContent() : Results.NotFound();
+})
+.WithName("DeleteSavedLocation")
+.RequireAuthorization("BookerOrStaff");
 
 // ===================================================================
 // QUOTE ENDPOINTS
