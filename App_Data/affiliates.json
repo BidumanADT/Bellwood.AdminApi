@@ -1,1 +1,12 @@
-[]
+[
+  {
+    "Id": "5ae4c0cca5a0498b9d546efc15741fa0",
+    "Name": "Alpha Test Limo",
+    "Phone": "1234567890",
+    "Email": "AlphaTestLimo@alpha.test",
+    "StreetAddress": "123 Fourth St.",
+    "City": "Chicago",
+    "State": "IL",
+    "Drivers": []
+  }
+]
