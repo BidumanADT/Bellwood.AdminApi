@@ -511,6 +511,7 @@ app.MapGet("/profile/passengers", async (
 
 // POST /profile/passengers - create a saved passenger
 app.MapPost("/profile/passengers", async (
+    [FromQuery] string? userId,
     [FromBody] Passenger payload,
     HttpContext context,
     ISavedPassengerRepository repo) =>
@@ -519,9 +520,16 @@ app.MapPost("/profile/passengers", async (
     if (string.IsNullOrWhiteSpace(callerId))
         return Results.Unauthorized();
 
+    if (!string.IsNullOrWhiteSpace(userId) && !IsStaffOrAdmin(context.User) && userId != callerId)
+        return Results.Forbid();
+
+    var targetId = IsStaffOrAdmin(context.User) && !string.IsNullOrWhiteSpace(userId)
+        ? userId
+        : callerId;
+
     var passenger = new SavedPassenger
     {
-        UserId       = callerId,
+        UserId       = targetId,
         FirstName    = payload.FirstName.Trim(),
         LastName     = payload.LastName.Trim(),
         PhoneNumber  = string.IsNullOrWhiteSpace(payload.PhoneNumber)  ? null : payload.PhoneNumber.Trim(),
@@ -630,6 +638,7 @@ app.MapGet("/profile/locations", async (
 
 // POST /profile/locations - create a saved location
 app.MapPost("/profile/locations", async (
+    [FromQuery] string? userId,
     [FromBody] SavedLocationRequest payload,
     HttpContext context,
     ISavedLocationRepository repo) =>
@@ -638,9 +647,16 @@ app.MapPost("/profile/locations", async (
     if (string.IsNullOrWhiteSpace(callerId))
         return Results.Unauthorized();
 
+    if (!string.IsNullOrWhiteSpace(userId) && !IsStaffOrAdmin(context.User) && userId != callerId)
+        return Results.Forbid();
+
+    var targetId = IsStaffOrAdmin(context.User) && !string.IsNullOrWhiteSpace(userId)
+        ? userId
+        : callerId;
+
     var location = new SavedLocation
     {
-        UserId     = callerId,
+        UserId     = targetId,
         Label      = payload.Label.Trim(),
         Address    = payload.Address.Trim(),
         Latitude   = payload.Latitude,

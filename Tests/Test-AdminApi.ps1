@@ -172,6 +172,25 @@ function Clear-TestData {
 # AUTHENTICATION
 # ===================================================================
 
+function Get-UserToken {
+    param(
+        [string]$Username,
+        [string]$Password
+    )
+
+    $loginBody = @{
+        username = $Username
+        password = $Password
+    }
+
+    $result = Invoke-ApiRequest -Method POST -Uri "$AuthServerUrl/api/auth/login" -Body $loginBody
+    if ($result.Success -and $result.Content.accessToken) {
+        return $result.Content.accessToken
+    }
+
+    return $null
+}
+
 function Get-AdminToken {
     Write-TestHeader "AUTHENTICATION"
     
@@ -286,6 +305,98 @@ function Test-UserManagement {
     
     $result = Invoke-ApiRequest -Method POST -Uri "$AdminApiUrl/users" -Body $invalidRoleBody -Token $Global:AdminToken -ExpectFailure
     Write-TestResult -TestName "POST /users (Invalid Role - Should Fail)" -Passed ($result.StatusCode -eq 400)
+}
+
+# ===================================================================
+# PROFILE SAVED ITEMS TESTS
+# ===================================================================
+
+function Test-ProfileSavedItemsStaffOverrides {
+    Write-TestHeader "PROFILE SAVED ITEMS STAFF OVERRIDES"
+
+    $bookerPassword = "TempPass123!"
+    $dispatcherPassword = "TempPass123!"
+
+    $targetBookerEmail = "target.booker.$([guid]::NewGuid().ToString('N').Substring(0,8))@example.com"
+    $otherBookerEmail = "other.booker.$([guid]::NewGuid().ToString('N').Substring(0,8))@example.com"
+    $dispatcherEmail = "profile.dispatcher.$([guid]::NewGuid().ToString('N').Substring(0,8))@example.com"
+
+    $targetCreate = Invoke-ApiRequest -Method POST -Uri "$AdminApiUrl/users" -Token $Global:AdminToken -Body @{
+        email = $targetBookerEmail
+        firstName = "Target"
+        lastName = "Booker"
+        tempPassword = $bookerPassword
+        roles = @("Booker")
+    }
+    $targetCreated = $targetCreate.Success -and $targetCreate.StatusCode -eq 201 -and $targetCreate.Content.userId
+    Write-TestResult -TestName "Create target booker for profile tests" -Passed $targetCreated
+    if (-not $targetCreated) { return }
+    $targetBookerId = $targetCreate.Content.userId
+
+    $otherCreate = Invoke-ApiRequest -Method POST -Uri "$AdminApiUrl/users" -Token $Global:AdminToken -Body @{
+        email = $otherBookerEmail
+        firstName = "Other"
+        lastName = "Booker"
+        tempPassword = $bookerPassword
+        roles = @("Booker")
+    }
+    $otherCreated = $otherCreate.Success -and $otherCreate.StatusCode -eq 201
+    Write-TestResult -TestName "Create non-staff actor booker for profile tests" -Passed $otherCreated
+    if (-not $otherCreated) { return }
+
+    $dispatcherCreate = Invoke-ApiRequest -Method POST -Uri "$AdminApiUrl/users" -Token $Global:AdminToken -Body @{
+        email = $dispatcherEmail
+        firstName = "Profile"
+        lastName = "Dispatcher"
+        tempPassword = $dispatcherPassword
+        roles = @("Dispatcher")
+    }
+    $dispatcherCreated = $dispatcherCreate.Success -and $dispatcherCreate.StatusCode -eq 201
+    Write-TestResult -TestName "Create dispatcher for profile tests" -Passed $dispatcherCreated
+    if (-not $dispatcherCreated) { return }
+
+    $otherBookerToken = Get-UserToken -Username $otherBookerEmail -Password $bookerPassword
+    $dispatcherToken = Get-UserToken -Username $dispatcherEmail -Password $dispatcherPassword
+
+    Write-TestResult -TestName "Authenticate non-staff booker for profile tests" -Passed (-not [string]::IsNullOrWhiteSpace($otherBookerToken))
+    Write-TestResult -TestName "Authenticate dispatcher for profile tests" -Passed (-not [string]::IsNullOrWhiteSpace($dispatcherToken))
+
+    if ([string]::IsNullOrWhiteSpace($otherBookerToken) -or [string]::IsNullOrWhiteSpace($dispatcherToken)) { return }
+
+    $forbiddenPassenger = Invoke-ApiRequest -Method POST -Uri "$AdminApiUrl/profile/passengers?userId=$targetBookerId" -Token $otherBookerToken -ExpectFailure -Body @{
+        firstName = "Blocked"
+        lastName = "Passenger"
+        phoneNumber = "555-1000"
+        emailAddress = "blocked.passenger@example.com"
+    }
+    Write-TestResult -TestName "Non-staff cannot POST /profile/passengers for another user" -Passed ($forbiddenPassenger.StatusCode -eq 403)
+
+    $staffPassengerCreate = Invoke-ApiRequest -Method POST -Uri "$AdminApiUrl/profile/passengers?userId=$targetBookerId" -Token $dispatcherToken -Body @{
+        firstName = "Staff"
+        lastName = "CreatedPassenger"
+        phoneNumber = "555-2000"
+        emailAddress = "staff.passenger@example.com"
+    }
+    $staffPassengerCreated = $staffPassengerCreate.Success -and $staffPassengerCreate.StatusCode -eq 201
+    Write-TestResult -TestName "Staff can POST /profile/passengers for another user" -Passed $staffPassengerCreated
+
+    $staffPassengerList = Invoke-ApiRequest -Method GET -Uri "$AdminApiUrl/profile/passengers?userId=$targetBookerId" -Token $dispatcherToken
+    $passengerVisible = $staffPassengerList.Success -and @($staffPassengerList.Content).Count -gt 0 -and (@($staffPassengerList.Content) | Where-Object { $_.firstName -eq "Staff" -and $_.lastName -eq "CreatedPassenger" }).Count -gt 0
+    Write-TestResult -TestName "Staff-created passenger appears under GET /profile/passengers for target user" -Passed $passengerVisible
+
+    $staffLocationCreate = Invoke-ApiRequest -Method POST -Uri "$AdminApiUrl/profile/locations?userId=$targetBookerId" -Token $dispatcherToken -Body @{
+        label = "HQ"
+        address = "100 Main St"
+        latitude = 40.0
+        longitude = -74.0
+        isFavorite = $true
+    }
+    $staffLocationCreated = $staffLocationCreate.Success -and $staffLocationCreate.StatusCode -eq 201
+    Write-TestResult -TestName "Staff can POST /profile/locations for another user" -Passed $staffLocationCreated
+
+    $staffLocationList = Invoke-ApiRequest -Method GET -Uri "$AdminApiUrl/profile/locations?userId=$targetBookerId" -Token $dispatcherToken
+    $locationVisible = $staffLocationList.Success -and @($staffLocationList.Content).Count -gt 0 -and (@($staffLocationList.Content) | Where-Object { $_.label -eq "HQ" -and $_.address -eq "100 Main St" }).Count -gt 0
+    Write-TestResult -TestName "Staff-created location appears under GET /profile/locations for target user" -Passed $locationVisible
 }
 
 # ===================================================================
@@ -564,6 +675,7 @@ try {
     # Step 3: Run all test suites
     Test-HealthEndpoints
     Test-UserManagement
+    Test-ProfileSavedItemsStaffOverrides
     Test-Quotes
     Test-Bookings
     Test-AffiliatesAndDrivers
