@@ -1,0 +1,80 @@
+name: Deploy AdminAPI to ECS
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+  ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+  ECS_SERVICE: ${{ vars.ECS_SERVICE }}
+  ECS_TASK_DEFINITION_PATH: ${{ vars.ECS_TASK_DEFINITION_PATH }}
+  ECS_CONTAINER_NAME: ${{ vars.ECS_CONTAINER_NAME }}
+  DOCKERFILE_PATH: ${{ vars.DOCKERFILE_PATH }}
+
+jobs:
+  deploy:
+    name: Build, Push, and Deploy AdminAPI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required workflow variables
+        run: |
+          test -n "${AWS_REGION}" || (echo "Missing vars.AWS_REGION" && exit 1)
+          test -n "${ECR_REPOSITORY}" || (echo "Missing vars.ECR_REPOSITORY" && exit 1)
+          test -n "${ECS_CLUSTER}" || (echo "Missing vars.ECS_CLUSTER" && exit 1)
+          test -n "${ECS_SERVICE}" || (echo "Missing vars.ECS_SERVICE" && exit 1)
+          test -n "${ECS_TASK_DEFINITION_PATH}" || (echo "Missing vars.ECS_TASK_DEFINITION_PATH" && exit 1)
+          test -n "${ECS_CONTAINER_NAME}" || (echo "Missing vars.ECS_CONTAINER_NAME" && exit 1)
+          test -n "${DOCKERFILE_PATH}" || (echo "Missing vars.DOCKERFILE_PATH" && exit 1)
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push AdminAPI image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          IMAGE_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          echo "Building ${IMAGE_URI}"
+          docker build -f "${DOCKERFILE_PATH}" -t "${IMAGE_URI}" .
+          docker push "${IMAGE_URI}"
+          echo "image=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
+
+      - name: Render ECS task definition with new image
+        id: render-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ env.ECS_TASK_DEFINITION_PATH }}
+          container-name: ${{ env.ECS_CONTAINER_NAME }}
+          image: ${{ steps.build-image.outputs.image }}
+          # Optional AdminAPI-specific runtime placeholders (uncomment if your task definition needs them):
+          # environment-variables: |
+          #   ASPNETCORE_ENVIRONMENT=Production
+          #   APP_DATA_PATH=/app/data
+
+      - name: Deploy ECS task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
