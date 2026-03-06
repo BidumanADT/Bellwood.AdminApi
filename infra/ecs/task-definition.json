@@ -1,0 +1,81 @@
+{
+  "family": "bellwood-adminapi",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/EXECUTION_ROLE_NAME",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/TASK_ROLE_NAME",
+  "volumes": [
+    {
+      "name": "app-data",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "EFS_FILE_SYSTEM_ID",
+        "transitEncryption": "ENABLED",
+        "authorizationConfig": {
+          "accessPointId": "EFS_ACCESS_POINT_ID",
+          "iam": "ENABLED"
+        }
+      }
+    }
+  ],
+  "containerDefinitions": [
+    {
+      "name": "bellwood-adminapi",
+      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/bellwood-adminapi:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "mountPoints": [
+        {
+          "sourceVolume": "app-data",
+          "containerPath": "/app/App_Data",
+          "readOnly": false
+        }
+      ],
+      "environment": [
+        {
+          "name": "ASPNETCORE_ENVIRONMENT",
+          "value": "Alpha"
+        },
+        {
+          "name": "ASPNETCORE_URLS",
+          "value": "http://+:8080"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "Jwt__Key",
+          "valueFrom": "arn:aws:ssm:REGION:ACCOUNT_ID:parameter/bellwood/alpha/adminapi/jwt-key"
+        },
+        {
+          "name": "Email__SmtpPassword",
+          "valueFrom": "arn:aws:ssm:REGION:ACCOUNT_ID:parameter/bellwood/alpha/adminapi/smtp-password"
+        },
+        {
+          "name": "ApplicationInsights__ConnectionString",
+          "valueFrom": "arn:aws:ssm:REGION:ACCOUNT_ID:parameter/bellwood/alpha/adminapi/appinsights-connstring"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/bellwood-adminapi",
+          "awslogs-region": "REGION",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8080/health/live || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 15
+      }
+    }
+  ]
+}
