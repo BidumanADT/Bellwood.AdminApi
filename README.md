@@ -960,6 +960,44 @@ For issues or questions:
 ✅ **Mobile-Optimized** for AdminPortal (Blazor), PassengerApp (MAUI), DriverApp (MAUI)  
 ✅ **Production-Ready** with proper error handling, logging, and monitoring  
 
+## Docker (ECS Fargate)
+
+Build and push the container image:
+
+```bash
+cd Bellwood.AdminApi
+docker build -t bellwood-adminapi .
+
+# Tag & push to ECR
+aws ecr get-login-password --region REGION | docker login --username AWS --password-stdin ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com
+docker tag bellwood-adminapi:latest ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/bellwood-adminapi:latest
+docker push ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/bellwood-adminapi:latest
+```
+
+The container listens on port **8080** (`ASPNETCORE_URLS=http://+:8080`).
+An `/app/App_Data` directory is created in the image and should be backed by an EFS volume mount in ECS.
+
+### ECS Task Definition
+
+Template: `infra/ecs/task-definition.json`
+
+**Placeholders to replace:**
+
+| Placeholder | Description |
+|---|---|
+| `ACCOUNT_ID` | AWS account ID |
+| `REGION` | AWS region (e.g. `us-east-1`) |
+| `EXECUTION_ROLE_NAME` | IAM role for ECS task execution (ECR pull + SSM read) |
+| `TASK_ROLE_NAME` | IAM role for the running task (needs EFS access) |
+| `EFS_FILE_SYSTEM_ID` | EFS file system ID for persistent App_Data storage |
+| `EFS_ACCESS_POINT_ID` | EFS access point ID (create with path `/adminapi`, POSIX uid/gid `1000`) |
+
+**SSM parameters required:**
+
+- `/bellwood/alpha/adminapi/jwt-key` - JWT signing key (must match across all services)
+- `/bellwood/alpha/adminapi/smtp-password` - SMTP password for email notifications
+- `/bellwood/alpha/adminapi/appinsights-connstring` - Application Insights connection string
+
 ---
 
 **Built with care using .NET 8 Minimal APIs + SignalR**

@@ -2899,7 +2899,7 @@ app.MapGet("/affiliates/list", async (IAffiliateRepository affiliateRepo, IDrive
     return Results.Ok(affiliates);
 })
 .WithName("ListAffiliates")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly");
 
 // POST /affiliates - Create a new affiliate
 app.MapPost("/affiliates", async (
@@ -2932,7 +2932,7 @@ app.MapPost("/affiliates", async (
     return Results.Created($"/affiliates/{affiliate.Id}", affiliate);
 })
 .WithName("CreateAffiliate")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly");
 
 // GET /affiliates/{id} - Get affiliate by ID
 app.MapGet("/affiliates/{id}", async (string id, IAffiliateRepository affiliateRepo, IDriverRepository driverRepo) =>
@@ -2946,7 +2946,7 @@ app.MapGet("/affiliates/{id}", async (string id, IAffiliateRepository affiliateR
     return Results.Ok(affiliate);
 })
 .WithName("GetAffiliate")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly");
 
 // PUT /affiliates/{id} - Update affiliate
 app.MapPut("/affiliates/{id}", async (
@@ -2979,7 +2979,7 @@ app.MapPut("/affiliates/{id}", async (
     return Results.Ok(affiliate);
 })
 .WithName("UpdateAffiliate")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly");
 
 // DELETE /affiliates/{id} - Delete affiliate (cascade delete drivers)
 app.MapDelete("/affiliates/{id}", async (
@@ -3018,7 +3018,7 @@ app.MapDelete("/affiliates/{id}", async (
     return Results.Ok(new { message = "Affiliate and associated drivers deleted", id });
 })
 .WithName("DeleteAffiliate")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly");
 
 // POST /affiliates/{affiliateId}/drivers - Create driver under affiliate
 app.MapPost("/affiliates/{affiliateId}/drivers", async (
@@ -3082,7 +3082,7 @@ app.MapPost("/affiliates/{affiliateId}/drivers", async (
     return Results.Created($"/drivers/{driver.Id}", driver);
 })
 .WithName("CreateDriver")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly");
 
 // GET /drivers/list - List all drivers
 app.MapGet("/drivers/list", async (IDriverRepository repo) =>
@@ -3091,7 +3091,7 @@ app.MapGet("/drivers/list", async (IDriverRepository repo) =>
     return Results.Ok(drivers);
 })
 .WithName("ListDrivers")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly");
 
 // GET /drivers/by-uid/{userUid} - Get driver by AuthServer UserUid
 app.MapGet("/drivers/by-uid/{userUid}", async (string userUid, IDriverRepository repo) =>
@@ -3100,7 +3100,7 @@ app.MapGet("/drivers/by-uid/{userUid}", async (string userUid, IDriverRepository
     return driver is null ? Results.NotFound(new { error = "No driver found with this UserUid" }) : Results.Ok(driver);
 })
 .WithName("GetDriverByUserUid")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly");
 
 // GET /drivers/{id} - Get driver by ID
 app.MapGet("/drivers/{id}", async (string id, IDriverRepository repo) =>
@@ -3109,7 +3109,7 @@ app.MapGet("/drivers/{id}", async (string id, IDriverRepository repo) =>
     return driver is null ? Results.NotFound() : Results.Ok(driver);
 })
 .WithName("GetDriver")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly");
 
 // PUT /drivers/{id} - Update driver
 app.MapPut("/drivers/{id}", async (
@@ -3167,7 +3167,7 @@ app.MapPut("/drivers/{id}", async (
     return Results.Ok(driver);
 })
 .WithName("UpdateDriver")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly");
 
 // DELETE /drivers/{id} - Delete driver
 app.MapDelete("/drivers/{id}", async (
@@ -3198,7 +3198,7 @@ app.MapDelete("/drivers/{id}", async (
     return Results.Ok(new { message = "Driver deleted", id });
 })
 .WithName("DeleteDriver")
-.RequireAuthorization();
+.RequireAuthorization("StaffOnly");
 
 // POST /bookings/{bookingId}/assign-driver - Assign driver to booking
 app.MapPost("/bookings/{bookingId}/assign-driver", async (
