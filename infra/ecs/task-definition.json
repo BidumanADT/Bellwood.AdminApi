@@ -55,6 +55,18 @@
         {
           "name": "Email__SmtpPassword",
           "valueFrom": "arn:aws:ssm:us-east-1:105319843299:parameter/bellwood/alpha/adminapi/smtp-password"
+        },
+        {
+          "name": "Email__Smtp__Host",
+          "valueFrom": "arn:aws:ssm:us-east-1:105319843299:parameter/bellwood/alpha/adminapi/smtp-host"
+        },
+        {
+          "name": "Email__Smtp__From",
+          "valueFrom": "arn:aws:ssm:us-east-1:105319843299:parameter/bellwood/alpha/adminapi/smtp-from"
+        },
+        {
+          "name": "Email__Smtp__Username",
+          "valueFrom": "arn:aws:ssm:us-east-1:105319843299:parameter/bellwood/alpha/adminapi/smtp-username"
         }
       ],
       "logConfiguration": {
