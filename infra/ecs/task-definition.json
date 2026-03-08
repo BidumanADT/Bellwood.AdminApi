@@ -1,19 +1,19 @@
 {
   "family": "bellwood-adminapi",
   "networkMode": "awsvpc",
-  "requiresCompatibilities": ["FARGATE"],
+  "requiresCompatibilities": [ "FARGATE" ],
   "cpu": "256",
   "memory": "512",
-  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/EXECUTION_ROLE_NAME",
-  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/TASK_ROLE_NAME",
+  "executionRoleArn": "arn:aws:iam::105319843299:role/bellwood-ecs-task-execution-role",
+  "taskRoleArn": "arn:aws:iam::105319843299:role/bellwood-adminapi-task-role",
   "volumes": [
     {
       "name": "app-data",
       "efsVolumeConfiguration": {
-        "fileSystemId": "EFS_FILE_SYSTEM_ID",
+        "fileSystemId": "fs-039a9f1651c4cf2fe",
         "transitEncryption": "ENABLED",
         "authorizationConfig": {
-          "accessPointId": "EFS_ACCESS_POINT_ID",
+          "accessPointId": "fsap-08ad20dd4dd547495",
           "iam": "ENABLED"
         }
       }
@@ -22,7 +22,7 @@
   "containerDefinitions": [
     {
       "name": "bellwood-adminapi",
-      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/bellwood-adminapi:latest",
+      "image": "105319843299.dkr.ecr.us-east-1.amazonaws.com/bellwood-adminapi:latest",
       "essential": true,
       "portMappings": [
         {
@@ -50,31 +50,20 @@
       "secrets": [
         {
           "name": "Jwt__Key",
-          "valueFrom": "arn:aws:ssm:REGION:ACCOUNT_ID:parameter/bellwood/alpha/adminapi/jwt-key"
+          "valueFrom": "arn:aws:ssm:us-east-1:105319843299:parameter/bellwood/alpha/adminapi/jwt-key"
         },
         {
           "name": "Email__SmtpPassword",
-          "valueFrom": "arn:aws:ssm:REGION:ACCOUNT_ID:parameter/bellwood/alpha/adminapi/smtp-password"
-        },
-        {
-          "name": "ApplicationInsights__ConnectionString",
-          "valueFrom": "arn:aws:ssm:REGION:ACCOUNT_ID:parameter/bellwood/alpha/adminapi/appinsights-connstring"
+          "valueFrom": "arn:aws:ssm:us-east-1:105319843299:parameter/bellwood/alpha/adminapi/smtp-password"
         }
       ],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
           "awslogs-group": "/ecs/bellwood-adminapi",
-          "awslogs-region": "REGION",
+          "awslogs-region": "us-east-1",
           "awslogs-stream-prefix": "ecs"
         }
-      },
-      "healthCheck": {
-        "command": ["CMD-SHELL", "curl -f http://localhost:8080/health/live || exit 1"],
-        "interval": 30,
-        "timeout": 5,
-        "retries": 3,
-        "startPeriod": 15
       }
     }
   ]
