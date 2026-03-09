@@ -8,6 +8,7 @@ using Bellwood.AdminApi.Middleware;
 using BellwoodGlobal.Mobile.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -22,6 +23,12 @@ using Serilog.Formatting.Compact;
 using static Bellwood.AdminApi.Services.UserAuthorizationHelper;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders =
+        ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+});
 
 Log.Logger = new LoggerConfiguration()
     .ReadFrom.Configuration(builder.Configuration)
@@ -283,6 +290,8 @@ var app = builder.Build();
 app.UseCors();
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<StructuredRequestLoggingMiddleware>();
+
+app.UseForwardedHeaders();
 
 // Phase 3: Error tracking middleware (before authentication to track all errors)
 app.UseMiddleware<ErrorTrackingMiddleware>();

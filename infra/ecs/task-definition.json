@@ -45,6 +45,10 @@
         {
           "name": "ASPNETCORE_URLS",
           "value": "http://+:8080"
+        },
+        {
+          "name": "ASPNETCORE_FORWARDEDHEADERS_ENABLED",
+          "value": "true"
         }
       ],
       "secrets": [
