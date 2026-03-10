@@ -49,6 +49,14 @@
         {
           "name": "ASPNETCORE_FORWARDEDHEADERS_ENABLED",
           "value": "true"
+        },
+        {
+          "name": "AuthServer__Url",
+          "value": "https://auth.elitebellwood.com"
+        },
+        {
+          "name": "Jwt__Authority",
+          "value": "https://auth.elitebellwood.com"
         }
       ],
       "secrets": [
