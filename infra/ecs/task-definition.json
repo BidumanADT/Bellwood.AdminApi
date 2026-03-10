@@ -65,7 +65,7 @@
           "valueFrom": "arn:aws:ssm:us-east-1:105319843299:parameter/bellwood/alpha/adminapi/jwt-key"
         },
         {
-          "name": "Email__SmtpPassword",
+          "name": "Email__Smtp__Password",
           "valueFrom": "arn:aws:ssm:us-east-1:105319843299:parameter/bellwood/alpha/adminapi/smtp-password"
         },
         {
