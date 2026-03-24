@@ -1885,20 +1885,9 @@ app.MapGet("/bookings/list", async ([FromQuery] int take, HttpContext context, I
 
     var list = filteredRows.Select(r =>
     {
-        // FIX: Handle DateTime.Kind for PickupDateTimeOffset
-        DateTimeOffset pickupOffset;
-        if (r.PickupDateTime.Kind == DateTimeKind.Utc)
-        {
-            var pickupLocal = TimeZoneInfo.ConvertTimeFromUtc(r.PickupDateTime, userTz);
-            pickupOffset = new DateTimeOffset(pickupLocal, userTz.GetUtcOffset(pickupLocal));
-        }
-        else
-        {
-            // Local or Unspecified - treat as already in userTz timezone
-            // Must convert to Unspecified to avoid offset mismatch
-            var unspecified = DateTime.SpecifyKind(r.PickupDateTime, DateTimeKind.Unspecified);
-            pickupOffset = new DateTimeOffset(unspecified, userTz.GetUtcOffset(unspecified));
-        }
+        var utcPickup    = NormalizeToUtc(r.PickupDateTime);
+        var pickupLocal  = TimeZoneInfo.ConvertTimeFromUtc(utcPickup, userTz);
+        var pickupOffset = new DateTimeOffset(pickupLocal, userTz.GetUtcOffset(pickupLocal));
         
         // FIX: Convert CreatedUtc to user's local timezone
         var createdLocal = TimeZoneInfo.ConvertTimeFromUtc(r.CreatedUtc, userTz);
@@ -1971,20 +1960,9 @@ app.MapGet("/bookings/{id}", async (string id, HttpContext context, IBookingRepo
     // Get user's timezone for PickupDateTimeOffset conversion
     var userTz = GetRequestTimeZone(context);
     
-    // Handle DateTime.Kind for PickupDateTimeOffset
-    DateTimeOffset pickupOffset;
-    if (rec.PickupDateTime.Kind == DateTimeKind.Utc)
-    {
-        var pickupLocal = TimeZoneInfo.ConvertTimeFromUtc(rec.PickupDateTime, userTz);
-        pickupOffset = new DateTimeOffset(pickupLocal, userTz.GetUtcOffset(pickupLocal));
-    }
-    else
-    {
-        // Local or Unspecified - treat as already in userTz timezone
-        // Must convert to Unspecified to avoid offset mismatch
-        var unspecified = DateTime.SpecifyKind(rec.PickupDateTime, DateTimeKind.Unspecified);
-        pickupOffset = new DateTimeOffset(unspecified, userTz.GetUtcOffset(unspecified));
-    }
+    var utcPickup    = NormalizeToUtc(rec.PickupDateTime);
+    var pickupLocal  = TimeZoneInfo.ConvertTimeFromUtc(utcPickup, userTz);
+    var pickupOffset = new DateTimeOffset(pickupLocal, userTz.GetUtcOffset(pickupLocal));
 
     // FIX: Convert CreatedUtc to user's local timezone
     var createdLocal = TimeZoneInfo.ConvertTimeFromUtc(rec.CreatedUtc, userTz);
