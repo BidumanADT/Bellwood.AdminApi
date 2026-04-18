@@ -3,6 +3,14 @@
     public sealed class EmailOptions
     {
         public string Mode { get; set; } = "Disabled";
+
+        /// <summary>
+        /// Event names listed here are silently suppressed (logged at Debug, return success).
+        /// Recognised values: QuoteSubmitted, BookingCreated, BookingCancelled,
+        ///   DriverAssigned, QuoteResponse, QuoteAccepted, BookingConfirmed, BookingReceived.
+        /// Leave empty to send all emails normally.
+        /// </summary>
+        public List<string> SuppressedEvents { get; set; } = new();
         public EmailSmtpOptions Smtp { get; set; } = new();
         public EmailOverrideRecipientsOptions OverrideRecipients { get; set; } = new();
         public bool IncludeOriginalRecipientInSubject { get; set; } = false;
